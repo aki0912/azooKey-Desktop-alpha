@@ -37,7 +37,7 @@ import Testing
                 let label: String
             }
         }
-        let file = try String(contentsOf: autoMixedRepositoryFile("docs/auto-mixed/fixtures/span_cases.jsonl"), encoding: .utf8)
+        let file = try String(contentsOf: autoMixedRepositoryFile("docs/auto-mixed-old/fixtures/span_cases.jsonl"), encoding: .utf8)
         let records = try file.split(separator: "\n").map { try JSONDecoder().decode(Record.self, from: Data($0.utf8)) }
         #expect(records.count == 50)
         for record in records {

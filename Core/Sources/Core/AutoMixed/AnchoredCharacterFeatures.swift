@@ -62,7 +62,7 @@ public struct AnchoredCharacterFeatures: Sendable {
         return shapes[position]
     }
 
-    private static func escape(_ value: UInt32) -> String {
+    static func escape(_ value: UInt32) -> String {
         switch value {
         case 0x22: return "\\\""
         case 0x5c: return "\\\\"

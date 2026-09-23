@@ -810,7 +810,6 @@ extension azooKeyMacInputController {
         var actual = NSRange()
         // 同じ行の文字のみコンテキストに含める
         let leftSideContext = self.client().string(from: leftRange, actualRange: &actual)
-        self.appendDebugMessage("\(#function): leftSideContext=\(leftSideContext ?? "nil")")
         return leftSideContext
     }
 
@@ -824,7 +823,6 @@ extension azooKeyMacInputController {
         let rightRange = NSRange(location: startIndex, length: min(documentLength - startIndex, maxCount))
         var actual = NSRange()
         let rightSideContext = self.client().string(from: rightRange, actualRange: &actual)
-        self.appendDebugMessage("\(#function): rightSideContext=\(rightSideContext ?? "nil")")
         return rightSideContext
     }
 

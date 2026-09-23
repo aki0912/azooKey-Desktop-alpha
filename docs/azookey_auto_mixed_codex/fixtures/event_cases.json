@@ -1,0 +1,382 @@
+{
+  "kind": "contract_fixture",
+  "note": "Harness events, not existing upstream APIs. Not executed as IME tests in this bundle.",
+  "cases": [
+    {
+      "id": "space-literal",
+      "layer": "mock_core",
+      "description": "空白は変換キーにしない",
+      "events": [
+        {
+          "op": "insert",
+          "text": "ashita"
+        },
+        {
+          "op": "key",
+          "key": "Space"
+        },
+        {
+          "op": "insert",
+          "text": "meeting"
+        },
+        {
+          "op": "key",
+          "key": "Space"
+        },
+        {
+          "op": "insert",
+          "text": "desu"
+        }
+      ],
+      "expected": {
+        "raw": "ashita meeting desu",
+        "display_with_mock": "明日 meeting です",
+        "insert_effect_count": 0
+      }
+    },
+    {
+      "id": "double-space",
+      "layer": "mock_core",
+      "description": "連続Spaceを削除しない",
+      "events": [
+        {
+          "op": "insert",
+          "text": "Hello"
+        },
+        {
+          "op": "key",
+          "key": "Space"
+        },
+        {
+          "op": "key",
+          "key": "Space"
+        },
+        {
+          "op": "insert",
+          "text": "world"
+        }
+      ],
+      "expected": {
+        "raw": "Hello  world",
+        "display_with_mock": "Hello  world"
+      }
+    },
+    {
+      "id": "candidate-then-commit",
+      "layer": "mock_core",
+      "description": "候補採用とOS確定を分ける",
+      "events": [
+        {
+          "op": "insert",
+          "text": "ashita"
+        },
+        {
+          "op": "key",
+          "key": "Tab"
+        },
+        {
+          "op": "key",
+          "key": "Enter"
+        },
+        {
+          "op": "assert",
+          "insert_effect_count": 0
+        },
+        {
+          "op": "key",
+          "key": "Enter"
+        }
+      ],
+      "expected": {
+        "insert_effect_count": 1,
+        "inserted_text": "明日",
+        "composition_empty": true
+      }
+    },
+    {
+      "id": "enter-pass-empty",
+      "layer": "mock_core",
+      "description": "確定後の次のEnterだけアプリが受ける",
+      "events": [
+        {
+          "op": "insert",
+          "text": "Hello"
+        },
+        {
+          "op": "key",
+          "key": "Enter"
+        },
+        {
+          "op": "key",
+          "key": "Enter"
+        }
+      ],
+      "expected": {
+        "insert_effect_count": 1,
+        "last_event_disposition": "fallthroughToApplication"
+      }
+    },
+    {
+      "id": "escape-raw",
+      "layer": "mock_core",
+      "description": "Escapeは全入力を削除せず原文へ戻す",
+      "events": [
+        {
+          "op": "insert",
+          "text": "ashita"
+        },
+        {
+          "op": "key",
+          "key": "Escape"
+        },
+        {
+          "op": "key",
+          "key": "Enter"
+        }
+      ],
+      "expected": {
+        "inserted_text": "ashita",
+        "learned_ja_candidate_count": 0
+      }
+    },
+    {
+      "id": "backspace-prefix",
+      "layer": "mock_core",
+      "description": "漢字表示からの削除は生ローマ字上で行う",
+      "events": [
+        {
+          "op": "insert",
+          "text": "kyou"
+        },
+        {
+          "op": "key",
+          "key": "Backspace"
+        },
+        {
+          "op": "key",
+          "key": "Backspace"
+        }
+      ],
+      "expected": {
+        "raw": "ky",
+        "insert_effect_count": 0
+      }
+    },
+    {
+      "id": "backspace-grapheme",
+      "layer": "mock_core",
+      "description": "ZWJ絵文字は原文1書記素として削除",
+      "events": [
+        {
+          "op": "insert",
+          "text": "a👩‍💻"
+        },
+        {
+          "op": "key",
+          "key": "Backspace"
+        }
+      ],
+      "expected": {
+        "raw": "a"
+      }
+    },
+    {
+      "id": "explicit-raw",
+      "layer": "mock_core",
+      "description": "区間の原文指定がモデルより優先",
+      "events": [
+        {
+          "op": "insert",
+          "text": "ashita"
+        },
+        {
+          "op": "override",
+          "start": 0,
+          "end": 6,
+          "mode": "raw"
+        }
+      ],
+      "expected": {
+        "raw": "ashita",
+        "display_with_mock": "ashita"
+      }
+    },
+    {
+      "id": "duplicate-event",
+      "layer": "xpc",
+      "description": "同じeventIDを重複処理しない",
+      "events": [
+        {
+          "op": "insert",
+          "text": "a",
+          "event_id": 1
+        },
+        {
+          "op": "insert",
+          "text": "a",
+          "event_id": 1
+        }
+      ],
+      "expected": {
+        "raw": "a"
+      }
+    },
+    {
+      "id": "duplicate-commit",
+      "layer": "client",
+      "description": "同じcommitIDのeffectを二重適用しない",
+      "events": [
+        {
+          "op": "receive_commit",
+          "commit_id": "c1",
+          "text": "Hello"
+        },
+        {
+          "op": "receive_commit",
+          "commit_id": "c1",
+          "text": "Hello"
+        }
+      ],
+      "expected": {
+        "insert_effect_count": 1
+      }
+    },
+    {
+      "id": "stale-focus",
+      "layer": "client",
+      "description": "古い入力欄の応答を新しい欄へ適用しない",
+      "events": [
+        {
+          "op": "activate",
+          "target": "A",
+          "epoch": 1
+        },
+        {
+          "op": "insert",
+          "text": "ashita"
+        },
+        {
+          "op": "activate",
+          "target": "B",
+          "epoch": 2
+        },
+        {
+          "op": "receive_snapshot",
+          "target": "A",
+          "epoch": 1
+        }
+      ],
+      "expected": {
+        "target_B_insert_effect_count": 0,
+        "target_B_marked_text_unchanged": true
+      }
+    },
+    {
+      "id": "command-pass",
+      "layer": "client",
+      "description": "Command shortcutは同期的にアプリ所有",
+      "events": [
+        {
+          "op": "insert",
+          "text": "Hello"
+        },
+        {
+          "op": "key",
+          "key": "A",
+          "modifiers": [
+            "command"
+          ]
+        }
+      ],
+      "expected": {
+        "last_event_disposition": "fallthroughToApplication"
+      }
+    },
+    {
+      "id": "old-capability",
+      "layer": "xpc",
+      "description": "古いサーバーへ新しいenumを送らない",
+      "events": [
+        {
+          "op": "capabilities",
+          "auto_mixed": false
+        },
+        {
+          "op": "enable_auto"
+        }
+      ],
+      "expected": {
+        "effective_policy": "manual",
+        "sent_unknown_enum_count": 0
+      }
+    },
+    {
+      "id": "fixture-rejected",
+      "layer": "model_loader",
+      "description": "ダミー重みでは本番モードを開始しない",
+      "events": [
+        {
+          "op": "load_model",
+          "kind": "fixture",
+          "runtime": "production"
+        },
+        {
+          "op": "enable_auto"
+        }
+      ],
+      "expected": {
+        "effective_policy": "manual"
+      }
+    },
+    {
+      "id": "learn-after-ack",
+      "layer": "xpc",
+      "description": "確定適用ack後にJAのみ1回学習",
+      "events": [
+        {
+          "op": "insert",
+          "text": "ashita"
+        },
+        {
+          "op": "key",
+          "key": "Enter"
+        },
+        {
+          "op": "assert",
+          "learned_ja_candidate_count": 0
+        },
+        {
+          "op": "commit_applied",
+          "commit_id": "c1"
+        },
+        {
+          "op": "commit_applied",
+          "commit_id": "c1"
+        }
+      ],
+      "expected": {
+        "learned_ja_candidate_count": 1
+      }
+    },
+    {
+      "id": "buffer-capacity",
+      "layer": "mock_core",
+      "description": "256scalar上限超過時だけ明示仕様に従い区切る",
+      "events": [
+        {
+          "op": "insert",
+          "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "op": "insert",
+          "text": "b"
+        }
+      ],
+      "expected": {
+        "insert_effect_count": 1,
+        "raw": "b",
+        "committed_source_scalar_count": 256
+      }
+    }
+  ]
+}

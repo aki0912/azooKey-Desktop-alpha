@@ -1,0 +1,39 @@
+{
+  "status": "proposal_not_a_completed_training_pipeline",
+  "seed": 20260923,
+  "split_policy": {
+    "group_key": "group_id",
+    "train": 0.7,
+    "dev": 0.1,
+    "calibration": 0.1,
+    "test": 0.1
+  },
+  "feature_spec_version": "anchored-char-v1",
+  "vocabulary_max_features": 32768,
+  "max_prefix_augmentations_per_group": 8,
+  "logistic_C_grid": [
+    0.1,
+    1.0,
+    10.0
+  ],
+  "switch_penalty_grid": [
+    0.0,
+    0.4,
+    0.8,
+    1.2,
+    2.0
+  ],
+  "positive_label": "JA_ROMAN",
+  "exclude_position_labels": [
+    "GAP",
+    "LITERAL",
+    "AMBIGUOUS"
+  ],
+  "runtime_backend": "native_swift",
+  "float_type": "float64",
+  "train_data": null,
+  "dev_data": null,
+  "calibration_data": null,
+  "test_data": null,
+  "note": "Set approved corpus paths. Do not train production weights on bundled fixture-only records."
+}

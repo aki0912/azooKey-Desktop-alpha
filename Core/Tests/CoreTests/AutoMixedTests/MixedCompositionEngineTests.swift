@@ -275,7 +275,7 @@ private func loadEventFixture() throws -> EventFixture {
     // Locate the canonical, user-supplied fixture from both Core and the isolated harness.
     var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     while directory.path != "/" {
-        let file = directory.appendingPathComponent("docs/auto-mixed/fixtures/event_cases.json")
+        let file = directory.appendingPathComponent("docs/auto-mixed-old/fixtures/event_cases.json")
         if FileManager.default.fileExists(atPath: file.path) {
             return try JSONDecoder().decode(EventFixture.self, from: Data(contentsOf: file))
         }

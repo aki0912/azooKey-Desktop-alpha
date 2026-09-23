@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auto Mixed LR model v2 (context candidate)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "feature_spec_version",
+    "kind",
+    "model_version",
+    "positive_label",
+    "vocabulary",
+    "coefficients",
+    "intercept",
+    "calibration",
+    "decoder",
+    "thresholds",
+    "training_manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "feature_spec_version": {
+      "const": "anchored-context-v2"
+    },
+    "kind": {
+      "enum": [
+        "fixture",
+        "production"
+      ]
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positive_label": {
+      "const": "JA_ROMAN"
+    },
+    "vocabulary": {
+      "type": "array",
+      "maxItems": 32768,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "coefficients": {
+      "type": "array",
+      "maxItems": 32768,
+      "items": {
+        "type": "number"
+      }
+    },
+    "intercept": {
+      "type": "number"
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "a",
+        "c"
+      ],
+      "properties": {
+        "a": {
+          "type": "number"
+        },
+        "c": {
+          "type": "number"
+        }
+      }
+    },
+    "decoder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "switch_penalty"
+      ],
+      "properties": {
+        "switch_penalty": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enter_ja",
+        "hold_ja",
+        "enter_ja_without_context",
+        "minimum_ja",
+        "minimum_path_margin"
+      ],
+      "properties": {
+        "enter_ja": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "hold_ja": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "enter_ja_without_context": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_ja": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_path_margin": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "training_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

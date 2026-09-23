@@ -5,14 +5,14 @@ import random
 import sys
 
 root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root / "docs/auto-mixed/reference"))
+sys.path.insert(0, str(root / "docs/auto-mixed-old/reference"))
 from auto_mixed_reference import (  # noqa: E402
     FEATURE_SPEC_VERSION, LinearLanguageModel, anchored_features, viterbi,
 )
 
-model_json = json.loads((root / "docs/auto-mixed/fixtures/language_model_fixture.json").read_text())
+model_json = json.loads((root / "docs/auto-mixed-old/fixtures/language_model_fixture.json").read_text())
 model = LinearLanguageModel(model_json, allow_fixture=True)
-golden = json.loads((root / "docs/auto-mixed/fixtures/feature_golden.json").read_text())
+golden = json.loads((root / "docs/auto-mixed-old/fixtures/feature_golden.json").read_text())
 positions = [(v["raw"], v["index"]) for v in golden["vectors"]]
 escaping = "".join(chr(i) for i in range(128)) + "ée\u0301👩‍💻\U0010ffff"
 positions += [(escaping, i) for i in range(len(escaping))]

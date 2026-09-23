@@ -15,7 +15,7 @@ func autoMixedRepositoryFile(_ relativePath: String) throws -> URL {
 }
 
 func languageFixtureData() throws -> Data {
-    try Data(contentsOf: autoMixedRepositoryFile("docs/auto-mixed/fixtures/language_model_fixture.json"))
+    try Data(contentsOf: autoMixedRepositoryFile("docs/auto-mixed-old/fixtures/language_model_fixture.json"))
 }
 
 /// Test-only JSON mutations, never an exported or trained production model.
@@ -48,7 +48,7 @@ func checkScore(_ vector: ScoreVector, model: LogisticLanguageModel) throws {
     @Test func all128GoldenFeaturesAndScores() throws {
         struct Golden: Decodable { let vectors: [ScoreVector] }
         let golden = try JSONDecoder().decode(Golden.self, from: Data(contentsOf:
-            autoMixedRepositoryFile("docs/auto-mixed/fixtures/feature_golden.json")))
+            autoMixedRepositoryFile("docs/auto-mixed-old/fixtures/feature_golden.json")))
         #expect(golden.vectors.count == 128)
         let model = try LogisticLanguageModel(testFixture: languageFixtureData())
         for vector in golden.vectors { try checkScore(vector, model: model) }

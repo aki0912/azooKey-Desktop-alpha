@@ -4,5 +4,7 @@ set -eu
 cd "$(dirname "$0")/.."
 mkdir -p build/auto-mixed
 PYTHONDONTWRITEBYTECODE=1 python3 Tools/generate_auto_mixed_parity.py > build/auto-mixed/reference-parity.json
+PYTHONDONTWRITEBYTECODE=1 python3 Tools/AutoMixedTraining/generate_context_golden.py > build/auto-mixed/context-parity.json
 AUTO_MIXED_PARITY_PATH="$PWD/build/auto-mixed/reference-parity.json" \
+AUTO_MIXED_CONTEXT_PARITY_PATH="$PWD/build/auto-mixed/context-parity.json" \
     sh Tools/test_auto_mixed_core.sh "$@"

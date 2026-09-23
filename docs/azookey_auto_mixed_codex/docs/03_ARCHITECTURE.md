@@ -1,0 +1,209 @@
+# 03. アーキテクチャと実装契約
+
+この章の新しい型・APIは**提案**であり、上流に実装済みという意味ではない。既存の入口は02章を参照する。
+
+## 1. 責務を4層に分ける
+
+| 層 | 責務 | 禁止事項 |
+|---|---|---|
+| IMKクライアント | 同期的なキー所有権、XPC送信、marked text描画、確定effect | モデル推論、独自のかな変換、確定後の本文の自動修正 |
+| MixedCompositionEngine | 原文・区間・カーソル・候補の状態遷移 | IMK呼出し、ファイルI/O、ネットワーク |
+| LanguageSegmenter | 保護規則、特徴量、LR、系列復号、保留 | 英字の破壊的正規化、候補確定・学習 |
+| ZenzaiSpanBridge | 日本語区間の候補生成、既存設定適用、確定学習 | 英語区間の変換、候補表示だけでの学習 |
+
+判定・レンダリングはpureな処理としてCoreに置く。IMK/AppKit不要のテストで検証できるようにする。既存変換資源はサーバー側で共有する。[S3]
+
+## 2. 原文の唯一性と範囲型
+
+`RawCompositionBuffer` が原本である。モデル、かな文字列、marked textから原文を再生成してはならない。
+
+```swift
+// 新規型のインターフェース案。実装時に必要なinit/validation等を加える。
+struct ScalarRange: Codable, Sendable, Equatable {
+    let lowerBound: Int
+    let upperBound: Int                 // end-exclusive
+}
+struct UTF16Range: Codable, Sendable, Equatable {
+    let location: Int
+    let length: Int
+}
+enum SpanKind: String, Codable, Sendable {
+    case japaneseRoman, raw, literal, gap, unresolved
+}
+struct MixedSpan: Sendable {
+    let id: UUID
+    let sourceRange: ScalarRange
+    var kind: SpanKind
+    var selectedCandidateToken: String?
+    var userOverride: SpanOverride?
+}
+struct CompositionIdentity: Codable, Sendable, Equatable {
+    let sessionEpoch: UUID
+    let compositionID: UUID
+    let revision: UInt64
+}
+```
+
+原文offsetの単位はUnicode scalar。`Swift.String.count`は書記素数なのでscalar数やUTF-16数に使わない。`NSRange`へ渡す値は**表示文字列のUTF-16単位**へ変換する。[S16]
+
+`TextOffsetMap` は以下を持つ。
+
+- 原文scalar境界↔Swift文字列index、書記素境界のテーブル。
+- 表示された各runのraw範囲とdisplay UTF-16範囲。
+- 変換runはmany-to-manyのatomic対応。中間位置の1対1対応を捏造しない。
+
+例：`👩‍💻`はUnicode scalar 3個、UTF-16 code unit 5個、通常の書記素1個。`e\u0301`はscalar2個・書記素1個。Backspaceは書記素単位、データ範囲はscalar単位、IMK描画はUTF-16単位で計算する。
+
+不変条件：spanは原文全体を重複なく被覆し、空区間を持たない。literal/gap/rawの出力は対応する原文sliceと完全一致する。実入力の大文字小文字や記号を小文字化したモデル入力で置換しない。
+
+## 3. キーイベント処理
+
+```text
+同期Routerで所有権確定
+ → サーバーがeventIDとepochを検査
+ → RawEditを適用 / revisionを進める
+ → 保護区間と強制指定の更新
+ → LanguageSegmenterで候補区間を計算
+ → 曖昧・未完・表示安定化規則を適用
+ → dirtyな日本語区間だけZenzaiへ候補要求
+ → MixedMarkedTextRendererで全体を連結
+ → snapshotとeffectsを返す
+```
+
+`RawEdit` は挿入、範囲削除、カーソル移動を表す。Tab・候補選択など原文を変更しない操作でも表示revisionは進める。原文revisionと表示revisionを分離してもよいが、候補結果の照合には必要な両方を含める。
+
+モデル欠損や非対応入力styleはモード開始前に判定する。無効な状態のまま「自動モード」と表示しない。英数／かな切替、composition commit/stop、deactivate、候補コマンドの**すべて**をauto/manualへ正しく振り分ける。
+
+## 4. 状態機械
+
+```text
+idle
+ └─ printable → composing
+composing
+ ├─ edit → composing（再推定）
+ ├─ Tab → selecting(spanID, candidateGeneration)
+ ├─ Enter / OS commit → commit transaction → idle
+ ├─ Escape → rawPreview（原文を維持）
+ └─ stop/deactivate → lifecycle処理
+selecting
+ ├─ Tab / Shift+Tab → 選択移動
+ ├─ Enter → composing（候補を内部で採用）
+ ├─ Escape → composing（候補を閉じる）
+ └─ edit → composing（候補世代を破棄し再推定）
+rawPreview
+ ├─ edit → composing（再推定を再開）
+ ├─ Enter → 原文確定 → idle
+ └─ Tab → 区間修正候補
+```
+
+rawPreviewは推定を一時停止した表示状態。Escape直後の再描画だけで再変換しない。通常入力で解除される。候補を選択した区間は、原文を編集しない限りユーザー選択を保持する。隣接区間の編集で文脈が変わっても既に選んだ候補を無断変更しない。
+
+## 5. 保護規則
+
+優先順位はセキュリティ／非対応経路のゲート → ユーザー指定 → 明確な保護パターン → モデル推定。日本語強制指定でも、URL全体など意味のある単位を部分破壊しないようUIに対象範囲を表示する。
+
+| 原文 | 初期処理 |
+|---|---|
+| URL、メールアドレス | token全体をliteral。安全な区切りまで維持 |
+| パス、拡張子付きファイル、`snake_case`、`foo::bar` | 明確な記号構造を持つtokenをliteral |
+| `API` / `HTTP`の2文字以上の連続大文字 | そのrunだけraw固定。後ろの`wotukau`まで保護しない |
+| `Swiftde` | `Swift`の保護ヒントを候補境界にする。全token固定は禁止 |
+| `made` / `name` | hard保護はしない。取得可能な文脈と校正した採用条件で判断し、根拠が弱ければraw表示。09章参照 |
+| 既存かな漢字・絵文字 | literal。新たに再変換しない |
+| ASCII空白 | gap。1個も削除・合成しない |
+
+URLの終端とその直後のローマ字が空白なしで連結された場合は、規則だけで意図を断定できない。安全側にURL全体を維持し、利用者の区間修正または明示的区切りを必要とする。この限界は評価表に記録する。
+
+英単語辞書は曖昧語情報・境界候補・ユーザー保護語の補助とし、辞書掲載だけで全tokenをliteralにしない。保護辞書は同梱権利を確認し、まずは少数の自作サンプルで始める。
+
+## 6. 既存Zenzaiへの接続
+
+### 6.1 セッションと排他
+
+既存サーバーは共有Converterと`createSession`/`withSession`を使う。[S3] mixedの各日本語spanには軽量なchild conversion sessionを対応させ、重み本体を再ロードしない。
+
+auto系コマンドは `main.swift` のdispatchでlegacy用`withConverterSession`の**外側へ分岐**させる。bridgeがchild sessionを有効化する際に、未確認のネストした`withSession`復元規則へ依存しない。
+
+すべてのConverter操作を現行同様サーバーMainActor上で逐次実行する。`withSession(childID) { ... }`内ではsuspendしない。child sessionは区間の消滅・composition終了・セッションcloseで必ずremoveする。上限は同時32個を暫定値とし、超過区間は原文表示で保留する。モデル精度が悪いと区間が増えるので、上限発生率も計測する。
+
+依存ライブラリの実装調査でchild sessionの共存や候補保持が不適切と判明した場合、stage gateで停止してadapter設計を変更する。複数の巨大モデルインスタンスを作ることで回避しない。
+
+### 6.2 提案するbridge契約
+
+```swift
+@MainActor
+protocol JapaneseSpanConverting {
+    func candidates(for request: JapaneseSpanRequest) throws -> JapaneseSpanResult
+    func recordCommittedSelection(_ token: CandidateToken) throws
+    func release(spanID: UUID)
+    func releaseAll()
+}
+```
+
+`JapaneseSpanRequest`：compositionID/revision、spanID、原文ローマ字slice、左文脈、右文脈、既存inputStyle、候補要求のrichフラグ、設定version。日英判定器へ渡す短い確定済み左文脈はこれとは別の任意入力。利用可能性、フォーカス、revisionを含む契約は09章を参照。
+
+`JapaneseSpanResult`：同じidentity、変換済みsource範囲、未完suffix範囲、全区間を被覆する候補、opaque candidate token、fallback reason。`Candidate`の任意文字列をクライアントから再構成して学習させない。token→実Candidateはサーバー所有にする。
+
+既存`SegmentsManager`にはこの契約がそのまま存在しない。以下の小さい変更を加える。
+
+1. 生ローマ字でcompositionを一括置換するAPIを追加し、最後に1回だけ候補要求する。既存の1文字挿入APIをループして毎回Zenzaiを呼ぶ実装は不可。
+2. `ComposingText`と標準入力表を使ってraw→かな・未完suffixを解釈する。公開APIで必要な範囲情報が取れるか確認し、取れなければ最小のadapter境界を設けてテストする。独自ローマ字テーブルを作らない。
+3. optionsの生成・user dictionary・資源解決を共有化し、legacyとautoで設定がずれないようにする。巨大な`SegmentsManager`を複製しない。
+4. `mainResults`から区間全体を消費する候補だけ採用する。未完suffixがある場合は変換可能prefixの全量を消費する候補＋suffixを合成する。部分候補を全文候補と誤認しない。
+5. 候補プレビューと確定学習を分離する。既存`prefixCandidateCommited`は学習と部分確定を伴うため、プレビューには使わない。[S6]
+
+### 6.3 境界・文脈・キャッシュ
+
+隣り合うJA文字ラベルは1つの変換spanにまとめる。1モーラごとにZenzaiを呼ばない。モデルが出した境界はローマ字の途中で切れる可能性があるため、04章の妥当性チェックでinvalid spanを保留へ戻す。
+
+左から順に変換する。左文脈はアプリから既存方式で取得した限定文脈＋現在composition内の前方表示。右文脈は既存取得方式の限定文脈を用い、未知の後続候補を正解として与えない。文脈上限は最初は既存30文字を尊重し、任意に全文取得へ拡張しない。[S3][S5]
+
+cache keyにはraw、input table version、左右文脈、モデル／辞書／設定version、richフラグを含める。これはメモリ内のみ保持する。前方候補が変わった場合は、後方の未選択JA spanの文脈依存cacheを無効化する。ユーザーが選んだ候補は保持する。
+
+## 7. 学習と確定
+
+mixed全体の確定時に表示文字列を1回だけOSへ挿入する。spanごとに先にinsertTextしてから全文insertTextしない。
+
+学習は、確定transactionに含まれるJA候補だけに適用する。英語・literal・unresolved・未完suffixを日本語の学習データへ入れない。設定で学習OFFなら一切更新しない。取消・Escapeの原文確定・候補の閲覧だけでは選択候補を学習しない。
+
+安全な初期実装は、クライアントで確定effectを適用した後に`commitApplied(commitID)`をサーバーへ返し、存続中のpending commit tokenに対して一度だけ学習する方式。ack喪失時は学習を諦める（再挿入はしない）。ackと重複防止はセッション内のみ保証する。未ackの候補tokenに必要なchild session／候補情報は、上限付きのpending commit領域でackまたは破棄まで保持する。通常のcomposition終了で先に破棄して無効tokenを学習しない。
+
+プロセスクラッシュをまたぐexactly-onceはこの仕様の保証外。
+
+## 8. XPCと古い応答
+
+新規フィールド案：
+
+```text
+request.autoMixedContext?: {policy, protocolVersion, sessionEpoch, compositionID}
+response.autoMixedSnapshot?: {identity, spans, markedText, cursorUTF16,
+                              activeSpanID, candidateGeneration, fallbackReason}
+response.commitEffects?: [{commitID, compositionID, text}]
+```
+
+既存responseのmarked textにも混在全体を反映し、mixed構造は区間UIの追加情報にする。wire型へ`NSAttributedString`やSwift `String.Index`を送らない。文字列と整数範囲と列挙値だけを使う。[S12]
+
+新しいnonoptionalフィールドにSwiftの初期値を書くだけでは旧JSONの欠損に対応できない。`decodeIfPresent`等で明示的な既定値を設け、旧データroundtripをテストする。旧サーバーへ未知のenum caseを送らず、capability確認が取れない場合はmanualで動作する。
+
+snapshotと確定effectを同一視しない。古いsnapshotは破棄できるが、未適用の有効なcommit effectまでrevisionだけで捨てると入力が欠落する。確定effectは順序付けとcommitID ledgerで管理し、同一セッション・クライアントで重複適用を防ぐ。
+
+フォーカス世代が違う応答を現在の入力欄へ適用しない。遅延確定は元クライアントとcompositionの対応が有効な間だけ適用する。deactivate時に新しい欄への挿入で帳尻を合わせない。OSによるcommit/stop順序の違いを実機テストする。
+
+## 9. 同期イベント所有権と障害
+
+既存routerはCommandを同期的に通し、pending中は保守的にconsumeする。[S4] autoでは、最終acknowledged状態にmixedのcomposition有無も加える。Tab/Space/Enterの判断をmanualの`InputState.event`だけに委ねない。
+
+Commandを通す方針は維持するが、Cmd+A/C/Vやアプリ選択変更との整合性は実機gateで検証する。IMKの`handle`が返った後にキーを「返す」APIがあると仮定しない。疑似キー再送による回復は実装しない。
+
+サーバー一時切断時：既存の同一eventID再送機構の範囲内で復旧する。新サーバーepochでは確定済みか不明な操作を盲目的に再送しない。クライアントが保持する最終表示／原文回復情報は応答再適用と回復のための一時ledgerであり、別の推定状態機械を持たせない。メモリ内のみとし、同じ有効なcompositionの範囲で原文維持を優先する。
+
+サーバーとIMEの同時クラッシュ、OSが破棄したcomposition、失われた確定ackについて無損失を保証しない。正常稼働時の文字欠落／二重挿入はrelease blocker、障害時の残余リスクは明示して測定する。
+
+## 10. 性能方針
+
+まず現行の逐次XPC応答構造のまま、判定を軽量化しZenzai要求をdirtyな区間へ限定する。分類器を速くしてもZenzaiがキーごとの応答を支配する可能性がある。初期版で推論結果を別push通知にするような非同期プロトコル再設計は行わない。
+
+測定で入力追従に問題が出たら、原文snapshotの先行応答＋後続候補通知を**別フェーズ**として設計する。その場合はidentity照合、順序制御、callback lifetimeの再設計が必要。根拠なく「debounceを入れれば完成」としない。
+
+---
+出典番号は [08. 一次資料・設計判断](08_SOURCES_AND_DECISIONS.md) を参照。

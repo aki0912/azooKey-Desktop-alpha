@@ -1,8 +1,8 @@
 # Auto Mixed Input 実装状況
 
-2026-09-24時点。**T0〜T2を完了し、次はT3のデータ・学習・評価へ進める。** 追加した処理はアプリから呼ばれない独立Coreであり、自動混在入力をIMEで利用できる段階ではない。T2の変更後はCoreテスト100件通過（既存70件＋T1の16件＋T2の14件）。ユーザー設定を一時変更する既存テスト1件は引き続き除外した。
+2026-09-24時点。**T0〜T2の回帰を維持し、T3の最初の差分（任意の左文脈・v2特徴量・条件付き保留・対照試験）を実装した。T3全体は未完了。** 追加した判定器はアプリから呼ばれない独立Coreであり、自動混在入力はOFFのまま。今回のCoreテストは110件通過（既存70件＋T1の16件＋T2の14件＋T3の10件）。ユーザー設定を一時変更する既存テスト1件は引き続き除外した。
 
-原文保持、Unicode範囲、モック状態機械に加え、文字位置特徴量、LRモデル読込、Viterbi復号、保護区間検出を実装した。Pythonとの数値一致を確認したが、学習済み判定モデル、実Zenzai接続、IMK接続は未実装。人工係数の数値テストと、学習モデルの精度評価は別である。
+v1とv2のPython／Swift数値一致を確認した。学習済み判定モデル、実Zenzai接続、混在入力のIMK接続は未実装。人工係数の対照試験は文脈が判定まで届くことを確認するもので、実際の曖昧語の判別性能やv2の優位性を示さない。以下のT0〜T2記録は当時の資料パスを含む。資料移動と今回の差分は末尾のT3欄に記録した。
 
 ## T0：参照commitと現状の確認を完了
 
@@ -178,7 +178,7 @@ Swift 6.4／Xcode 27／Python 3.11.9で検証した。既定SwiftPM方式のllam
 
 baseline・変更後とも、依存の辞書読込で任意のLOUDSファイル不足メッセージが出た。追加テストの出力ではない。既存のdeprecated設定警告、macOS 13指定とllama.frameworkの13.3最低versionの差も残る。native方式はSwift 6.4では非推奨であり、既定方式の署名問題を解決したことにはならない。
 
-### 再実行コマンド
+### T0〜T2時点の再実行コマンド
 
 リポジトリルートから順に実行する。Core全体は依存解決済み環境を前提とし、T1/T2単独テストは外部Swiftパッケージに依存しない。fresh parityにはPython 3が必要で、後続のCoreコマンドもその生成物を使う。
 
@@ -205,7 +205,7 @@ T0のbaseline用コピーは`mkdir -p build/auto-mixed/baseline`後、`git archi
 
 初回依存解決は、同じcache環境変数を付けて`swift package --package-path Core --scratch-path "$PWD/build/auto-mixed/core" --cache-path "$PWD/build/auto-mixed/cache" --disable-sandbox resolve`を実行した。ビルド・失敗のログは`build/auto-mixed/`の`baseline.log`、`baseline-retry.log`、`resolve.log`、`baseline-resolved.log`、`baseline-native.log`、`pure-tests.log`、`pure-tests-final.log`、`core-after.log`に残る。
 
-## 未実行事項と次stageの前提
+## T2完了時点の未実行事項と次stageの前提
 
 次はT3。`docs/auto-mixed/docs/04_MODEL_AND_DATA.md`、span schema、training config例を読み、権利を確認できるデータだけを使う学習・校正・評価パイプラインを作る。T2の特徴仕様とモデルschemaを固定契約として使い、元文章group単位のsplitとexport後のSwift parityを守る。学習用データの準備・権利確認・品質gateを満たさない限り、productionモデルや自動モード完成を宣言しない。
 
@@ -220,3 +220,104 @@ T0のbaseline用コピーは`mkdir -p build/auto-mixed/baseline`後、`git archi
 | T7・T8 | 実測性能・精度・障害注入・配布ライセンス・識別子・署名と導入。今回の範囲外 |
 
 通常使用中のIMEのインストール・削除・登録変更、LaunchAgent操作、プロセス終了、ユーザー辞書・学習データの変更は行っていない。追加Coreの実行時処理にはファイルI/O、ネットワーク通信、入力ログ保存を含めない。モデルは呼出側から渡されたDataを解析し、GGUFのロードは行わない。Python実行・fixtureの読込はテストハーネス内に限る。
+
+## T3初回差分：任意の確定済み左文脈と特徴量v2
+
+### 着手時の実物確認と資料との差分
+
+| 項目 | 2026-09-24の確認結果 |
+|---|---|
+| HEAD | `bafcadc0f45aa0f869a9ea907bbc3d5c411d0ac7`。直前はT1の `8226975`、その前は参照commit `b7ec0e4f27cf19d6a3aefa77d4b5ea7f2ebe5376`。HEADは変更していない |
+| T2実装 | HEADに特徴量、LR、Viterbi、保護検出、statistical segmenter、数値・brute-forceテスト、parity生成scriptが存在。コミット名だけで完了判定していない |
+| 参照commitとの差分 | T1/T2の独立Coreとテスト・検証script・資料が追加されている。着手時まで既存manual／XPC／依存manifestは参照commitと同じ |
+| 開始時のユーザー変更 | `git status --short` は `docs/auto-mixed/` の25ファイルが削除、`docs/auto-mixed-old/` と `docs/azookey_auto_mixed_codex/` が未追跡。ソースのユーザー変更はなし。移動を戻したり上書きしたりしていない |
+| AGENTS | リポジトリと親階層に実ファイルは見つからず、依頼のAGENTS指示を適用。更新資料の `AGENTS.addendum.md` も読んだ。追記案を既存指示と誤認して新規AGENTSを生成していない |
+| 読んだ資料 | `implementation_status.md` と更新資料の README、CODEX_START、CODEX_CONTINUE_AFTER_T2、02・04・05・06・09章。指定された `docs/auto-mixed/` 自体は存在しないため、対応する `docs/azookey_auto_mixed_codex/` を参照 |
+| 旧資料の保存 | `docs/auto-mixed-old/` の25ファイルがHEADの旧パスとbyte一致。旧bundleの23 checksum、更新bundleの27 checksumも一致。両方の提供資料に変更なし |
+| v1 schema | 新旧資料ともモデルは `schema_version=1`、`feature_spec_version=anchored-char-v1`、fixtureモデルは `kind=fixture`。更新版にもv2の実装・schema・学習済みモデルは含まれていなかった |
+| v1 fixture | feature golden、model fixture、span cases、event casesは新旧でbyte一致。golden SHA-256は `d2d9f12b9b870dd744df9ae75ac09085b6a98c0e552c58f4771cb4d55da6b057` |
+| v1実装と旧仕様 | T2コードにはmade/no/to/nameの無条件保留リストは存在しない。JA仮説を一律unresolvedへ戻すのはT4ローマ字検証が未実装なため。新仕様でもこの安全策とv1比較経路を保持 |
+| 依存／環境 | Converter checkoutは `ad714fea8cb2fe113aea86ba5c42563cdaf77cfb`。manifest変更なし。GGUF・base_n5_lmのgitlinkはT0記載SHAのまま未初期化。arm64、macOS 27.0（26A428）、Xcode 27.0（27A266a）、Swift 6.4、Python 3.11.9を再確認 |
+
+既存テストの資料パスだけを `docs/auto-mixed-old/` へ変更し、T2回帰を先に実行した。特徴量v1の生成規則、係数、golden、Viterbi、保護規則、期待値は変更していない。v1のcanonical escape関数はv2でも使うためprivateからinternalへ変更したが、出力は同じ。
+
+### 変更したファイルと仕様の具体化
+
+| ファイル | 変更内容 |
+|---|---|
+| `Core/Sources/Core/AutoMixed/LanguageJudgment.swift` | 新設の判定protocol、任意の文脈入力、明示的availability、30 scalar制限、不変request ID、結果の鮮度確認、raw表示用safeSpans。contextをCodableにせずdebug表示を伏せる |
+| `Core/Sources/Core/AutoMixed/ContextualCharacterFeatures.swift` | v1キー＋文脈v2キー。rawとcontextを連結せず、末尾の文字・shape・空白／句読点／日本語文字・短n-gram・ASCII末尾語を追加 |
+| `Core/Sources/Core/AutoMixed/LogisticLanguageModel.swift` | schema 2／v2の明示的な受理と型別score。v1/v2取り違えと不正な閾値を拒否。既存の内積・校正計算を共用。fixtureのproduction拒否も維持 |
+| `Core/Sources/Core/AutoMixed/ContextualLanguageSegmenter.swift` | 既存LR／Viterbi／保護検出を利用。文脈なし・低信頼時のJA保留をartifactの閾値で指定。単語別のhard maskや保留分岐は追加しない |
+| `Core/Tests/CoreTests/AutoMixedTests/ContextualLanguageTests.swift` | 新規10テスト。v1特徴包含、128 golden、788 fresh parity、文脈対照、空と欠損、Unicode、version拒否、閾値変更、保護、古いrequest識別 |
+| `Tools/AutoMixedTraining/` | v2のPython参照、schema、人工fixture、固定golden、生成器、5テスト、正確なキー／境界／保留契約を記したREADME。学習CLIではない |
+| 既存テスト3ファイル、`Tools/generate_auto_mixed_parity.py` | 利用者による旧資料の移動に合わせた参照パス修正のみ |
+| `Tools/test_auto_mixed_parity.sh` | 従来のv1生成・検証を維持し、v2のfresh生成・検証を追加 |
+| `azooKeyMac/InputController/azooKeyMacInputController.swift` | 左右の文脈本文をNSLogへ出す2行だけを除去。取得、manual変換、キー処理、XPC payloadは変更なし |
+
+09章で未固定だったv2キーと境界を `Tools/AutoMixedTraining/README.md` に定義した。モデルschemaを2に分けた理由は、追加特徴と保留閾値をv1 artifactから明確に区別するため。v1はschema 1のまま読める。
+
+保留の指標はrun内の平均p・最小pと、当該JA runだけをRAWへ置換した系列コスト差。文脈取得不可時には別の平均p閾値を用いる。値はモデルJSONから変えられ、単語名は判定条件に含めない。コスト差は隣接RAWとの切替罰則を含むが、系列全体の最良次点pathを求めるものではない。平均pもコスト差もspanの校正済み正解確率とは呼ばない。この限定は小さな差分で線形時間の比較を導入するためで、devでの採用可否は未評価。
+
+新APIの `userOverrides` はT6、候補cacheと非同期XPC適用はT4〜T5に残した。今回の判定器はstatelessかつ同期で、文脈cacheを持たない。文脈のみの変化でも新requestを作れば旧結果を識別できることを単体試験したが、実アプリの遅延応答破棄を検証したことにはならない。採用済み候補を更新する処理も接続していない。
+
+### 既存アプリの文脈取得経路
+
+実在する経路は `currentConverterTextContext()` → `getLeftSideContext()`／`getRightSideContext()` → `ConverterKeyEventRequest.context` → `ConverterServer+KeyEvent` の `session.setContext(request.context)`。`ConverterTextContext` は左右それぞれoptional String、transport上限は200。サーバーの `ConverterSession.getLeftSideContext(maxCount:)` は `String.suffix` によりCharacter単位で切る。新仕様の30 Unicode scalarとは単位が違う。
+
+クライアントはmarkedRangeを優先し、なければselectedRangeを使って `client().string(from:actualRange:)` を呼ぶ。activationGenerationによる応答の世代確認は存在する。一方、次の条件は現コードから安全と確認できなかった。
+
+- 選択範囲が非空の場合のunavailable化。現在はその手前の本文も取得する。
+- markedRange／selectedRangeが得られない場合の欠損表現。現在は位置0へ代替するため、成功した空文字と区別できない可能性がある。
+- 取得actualRangeの検証、UTF-16境界、同一入力欄・現在の文脈であることの確認。
+- セキュア入力時の明示的な取得抑止。既存OS経路が保護するとの推測だけでは新契約の保証にしない。
+
+そのため、取得APIがあることだけを理由にv2へ渡す配線は追加しなかった。既存の文脈本文ログ2行は削除した。新APIは欠損が既定で、v1のraw-only経路も残る。実際のIMK取得許可・フォーカス・選択・セキュア入力の確認は未実行。新判定器に文脈保存・外部送信・本文hash記録はない。保存したgoldenは固定の自作テスト文字列であり、利用者の入力欄から採取したものではない。既存アプリ全体の動的なログ監査はT7に残る。
+
+### 実行した検証と失敗
+
+| 検証 | 結果 |
+|---|---|
+| 修正前のparity script | 失敗。資料移動でPythonが旧 `docs/auto-mixed/reference` をimportできなかった。`t3-baseline.log` に記録 |
+| 参照パス修正後のT0〜T2回帰 | **30件／7 suite通過**。v2変更前のbaselineを `t3-v1-baseline.log` に保存 |
+| v2実装後、既存テストだけのコンパイル・回帰 | **30件通過**。`t3-compile.log` |
+| 新規Swiftテスト初回 | コンパイル失敗。throwするキー生成とScalarRange初期化に `try` が不足していた2か所を修正。期待値と許容誤差は変更していない。`t3-tests-first.log` |
+| `sh Tools/test_auto_mixed_parity.sh` 再実行 | **40件／8 suite通過**。v1 128 golden・325 fresh score・372 decoder pathを維持。v2 128 golden・788 freshでキー／active index一致、logit／p差は1e-12未満。`t3-tests-second.log` |
+| 変更後Core全体、native方式 | **110件／10 suite通過**。ConverterServerもビルド対象としてコンパイル・リンク。サーバー起動・登録なし。`t3-core.log` |
+| Python旧reference | **22件通過**。`t3-reference-v1.log` |
+| Python移行資料reference | **24件通過**。`t3-reference-migration.log` |
+| Python新規v2検証 | **5件通過**。固定golden再現、対照group・prefix split漏洩拒否、欠損契約、不正context拒否、v2 schemaを検証。`t3-python.log` |
+| bundle validators | 新旧とも意味検証とDraft 2020-12 schema検証成功（jsonschema 4.26.0）。旧50 span／128 golden／16 event、更新版は追加のcontext対照5件 |
+| 資料保全 | 旧資料25ファイルのHEAD一致、旧23・更新27のSHA-256一致。v1 fixtureを再生成・上書きしていない |
+| 静的確認 | `git diff --check`、shell syntax、変更アプリSwiftのfrontend parseを確認。新CoreにファイルI/O・ログ・ネットワーク・UserDefaultsの追加なし。アプリ文脈本文ログ2行の消失とmixed呼び出し未接続を確認 |
+| 報告文のlint | natural-japaneseのlintを再試行したが、`sudachipy`未導入で実行失敗。報告は手動で通読した。コードテストの結果とは別の制約 |
+
+検証ログはすべて `build/auto-mixed/` に保存した。Core全体では引き続き `testOptionPunctuationMappings` を除外した。この既存テストは使用中のAppGroup設定を書き換えるためで、期待値を弱めたり成功扱いにしたりしていない。
+
+SwiftPM既定方式のllama署名問題はT0/T2から未解決で、今回もnative方式を使用した。署名検証の無効化や依存変更はない。SwiftLintは実行ファイルがないため未実行。アプリSwiftのparseは完全なXcodeビルドや実機試験ではない。
+
+### 現在の再実行手順
+
+```sh
+sh Tools/test_auto_mixed_parity.sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Tools/AutoMixedTraining -p 'test_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s docs/auto-mixed-old/reference -p 'test_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s docs/azookey_auto_mixed_codex/reference -p 'test_*.py' -v
+python3 docs/auto-mixed-old/reference/validate_bundle.py
+python3 docs/azookey_auto_mixed_codex/reference/validate_bundle.py
+
+CLANG_MODULE_CACHE_PATH="$PWD/build/auto-mixed/clang-cache" \
+SWIFTPM_MODULECACHE_OVERRIDE="$PWD/build/auto-mixed/swift-cache" \
+AUTO_MIXED_PARITY_PATH="$PWD/build/auto-mixed/reference-parity.json" \
+AUTO_MIXED_CONTEXT_PARITY_PATH="$PWD/build/auto-mixed/context-parity.json" \
+swift test --package-path Core \
+  --scratch-path "$PWD/build/auto-mixed/core" \
+  --cache-path "$PWD/build/auto-mixed/cache" \
+  --disable-sandbox --build-system native --skip testOptionPunctuationMappings
+```
+
+### 次に進める範囲と未実行事項
+
+次はT3内のデータ・学習・校正・独立評価。今回のv1/v2契約を固定し、権利確認済みデータをgroup単位で分割して同条件で比較する。学習CLI、学習manifest／依存lock、productionモデル、model card、文脈有無・曖昧語・英語in日本語別の精度／保留率／反転回数／p95計測は未実装・未実行。fixtureの人工係数だけではT3完了にできない。
+
+実Zenzai、複数入力session、IMK／XPC文脈取得、古い非同期応答、候補cache、表示ヒステリシス、実機GUI、セキュア入力、対象アプリ試験、署名／配布、Linux CIも未実行。未学習モデルをproductionとして同梱していない。既存アプリに混在モードの生成・dispatch・設定UIはなく、機能OFFを維持する。IMEのインストール・削除・登録変更、LaunchAgent操作、ユーザー設定・辞書・学習履歴変更は行っていない。
