@@ -1,6 +1,6 @@
 # T3の最初の差分：確定済み左文脈を使うv2候補
 
-これは特徴量・数値契約・対照試験の実装であり、学習CLIや学習済みモデルではない。アプリからは呼ばれず、自動混在入力はOFFのまま。仕様入口は現在の作業ツリーでは `docs/azookey_auto_mixed_codex/docs/09_T2_MIGRATION.md`。利用者が移動した `docs/auto-mixed-old/` はT2の回帰資料として保持する。
+この文書は特徴量・数値契約・対照試験を説明する。追加した学習CLIの使い方と権利・分割の契約は [TRAINING.md](TRAINING.md) を参照。アプリからは呼ばれず、自動混在入力はOFFのまま。仕様入口は現在の作業ツリーでは `docs/azookey_auto_mixed_codex/docs/09_T2_MIGRATION.md`。利用者が移動した `docs/auto-mixed-old/` はT2の回帰資料として保持する。
 
 ## 入力と寿命
 
@@ -62,11 +62,11 @@ v2ではJA仮説runに対して次の条件をすべて要求する。不成立�
 
 ```sh
 sh Tools/test_auto_mixed_parity.sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Tools/AutoMixedTraining -p 'test_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python -m unittest discover -s Tools/AutoMixedTraining -p 'test_*.py' -v
 ```
 
-Pythonは標準ライブラリに加えschemaテストで `jsonschema` が必要（今回の環境は4.26.0）。`generate_context_golden.py` は固定の自作テスト文から788件を生成し、`--golden` はそこから決定的に選んだ128件を出力する。通常の検証では保存済みgoldenを書き換えず、新しい結果と比較する。入力欄・ユーザー入力履歴・外部コーパスは読み取らない。
+Pythonの全テストには [TRAINING.md](TRAINING.md) の隔離venvを使う。学習済みfixtureを使うテストも含める場合は同文書のsmokeを実行する。`generate_context_golden.py` は標準ライブラリだけで固定の自作テスト文から788件を生成し、`--golden` はそこから決定的に選んだ128件を出力する。通常の検証では保存済みgoldenを書き換えず、新しい結果と比較する。入力欄・ユーザー入力履歴・外部コーパスは読み取らない。
 
 v1の128件golden・325件のfresh特徴量／score・372件のdecoder pathは維持。v2は128件goldenと788件freshのキー・active index・logit・pをSwift/Python間で比較する。対照例は利用者提供の5件の意図契約と人工係数を使い、文脈経路、欠損、保留の調整可能性、raw保全、保護区間、古いrequestの識別を検証する。
 
-データの任意context項目は `record_context` で検査する。旧レコードはunavailable。availableなら30 scalars以下の文字列が必須、unavailableならleft_context自体を許容しない。元文・対照ペア・prefixのgroupがsplitを跨ぐ場合は拒否する。学習コーパスの構築、権利確認、学習CLI、校正、独立評価、学習manifest、model card、品質・速度の実測は未実装／未実行。T3全体の完了条件を満たしたものではない。
+データの任意context項目は `record_context` で検査する。旧レコードはunavailable。availableなら30 scalars以下の文字列が必須、unavailableならleft_context自体を許容しない。元文・対照ペア・prefixのgroupがsplitを跨ぐ場合は拒否する。学習CLIは後続の準備差分で追加したが、実学習コーパスの権利審査・学習・校正・独立評価と品質・速度の実測は未実行。T3全体の完了条件を満たしたものではない。

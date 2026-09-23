@@ -1,6 +1,6 @@
 # Auto Mixed Input 実装状況
 
-2026-09-24時点。**T0〜T2の回帰を維持し、T3の最初の差分（任意の左文脈・v2特徴量・条件付き保留・対照試験）を実装した。T3全体は未完了。** 追加した判定器はアプリから呼ばれない独立Coreであり、自動混在入力はOFFのまま。今回のCoreテストは110件通過（既存70件＋T1の16件＋T2の14件＋T3の10件）。ユーザー設定を一時変更する既存テスト1件は引き続き除外した。
+2026-09-24時点。**T0〜T2と文脈v2の回帰を維持し、T3準備として権利確認・分割・増強・学習・校正・export・評価のローカルCLIを追加した。T3全体は未完了。** 実行したのはfixture専用のパイプライン検証で、実コーパスの本番学習ではない。自動混在入力はOFFのまま。最新の検証と残る作業は末尾の「T3準備差分」に記録した。
 
 v1とv2のPython／Swift数値一致を確認した。学習済み判定モデル、実Zenzai接続、混在入力のIMK接続は未実装。人工係数の対照試験は文脈が判定まで届くことを確認するもので、実際の曖昧語の判別性能やv2の優位性を示さない。以下のT0〜T2記録は当時の資料パスを含む。資料移動と今回の差分は末尾のT3欄に記録した。
 
@@ -296,7 +296,7 @@ T0のbaseline用コピーは`mkdir -p build/auto-mixed/baseline`後、`git archi
 
 SwiftPM既定方式のllama署名問題はT0/T2から未解決で、今回もnative方式を使用した。署名検証の無効化や依存変更はない。SwiftLintは実行ファイルがないため未実行。アプリSwiftのparseは完全なXcodeビルドや実機試験ではない。
 
-### 現在の再実行手順
+### T3初回差分時点の再実行手順
 
 ```sh
 sh Tools/test_auto_mixed_parity.sh
@@ -321,3 +321,73 @@ swift test --package-path Core \
 次はT3内のデータ・学習・校正・独立評価。今回のv1/v2契約を固定し、権利確認済みデータをgroup単位で分割して同条件で比較する。学習CLI、学習manifest／依存lock、productionモデル、model card、文脈有無・曖昧語・英語in日本語別の精度／保留率／反転回数／p95計測は未実装・未実行。fixtureの人工係数だけではT3完了にできない。
 
 実Zenzai、複数入力session、IMK／XPC文脈取得、古い非同期応答、候補cache、表示ヒステリシス、実機GUI、セキュア入力、対象アプリ試験、署名／配布、Linux CIも未実行。未学習モデルをproductionとして同梱していない。既存アプリに混在モードの生成・dispatch・設定UIはなく、機能OFFを維持する。IMEのインストール・削除・登録変更、LaunchAgent操作、ユーザー設定・辞書・学習履歴変更は行っていない。
+
+## T3準備差分：権利確認済みローカルデータ向け学習パイプライン
+
+### 着手時の確認と範囲
+
+開始HEADは `998fccdceb6cb22b6d14830bf5adafc76a2d0072`、作業ツリーはクリーンだった。以前のT3初回差分と資料移動はコミット済み。指定の `docs/auto-mixed/` は引き続き存在せず、対応する `docs/azookey_auto_mixed_codex/docs/04_MODEL_AND_DATA.md`、span/model schema、training config例と現在のv2 schemaを読んだ。AGENTS実ファイルは見つからず、依頼に添付された指示を継続適用した。
+
+v1/v2の既存特徴量・モデルschema・golden・Core実行時処理は変更していない。変更対象は `Tools/AutoMixedTraining/` の学習ツール・文書、Swiftのオフライン検証テスト2ファイル、本記録。アプリ、manual入力、XPC、依存Swift manifest、IME登録は変更なし。新旧提供資料のchecksumも一致した。
+
+### 実装した内容
+
+| ファイル | 内容 |
+|---|---|
+| `Tools/AutoMixedTraining/pipeline.py` | validate-data、build-dataset、train、calibrate、export、evaluate。非ゼロ終了、出力上書き拒否、内容を含まない診断 |
+| `pipeline_io.py` | JSON重複キー・NaN/Inf拒否、checksum、相対ローカル入力、依存lock確認、実行環境・実装SHA記録 |
+| `dataset.py` | 原本と権利資料のhash／承認情報検証、元文groupと近重複の統合、分割固定、variant/prefix増強、派生データのsplit保持 |
+| `swift_bridge.py` | 既存Coreを専用test processで呼び、生成したvariantの読み一致と全行の実保護maskを検証。本文処理中の依存DEBUG出力を抑止し、一時入力を削除 |
+| `learning.py` | train限定語彙、float64疎行列LR、devでC選択、calibration限定sigmoid、devでdecoder／採用閾値選択、test評価とprefix再計算 |
+| `fixture_manifest.json`、`training_config.json` | 提供fixtureのhashと検証用設定。fixtureとapprovedの経路を分離 |
+| `approval_manifest.example.json` | 実データの承認記録の雛形。pending_review・未記入のままでは実行不可 |
+| `requirements.lock` | 隔離Python環境の依存版を固定。配布物hash付きlockではない |
+| `fixture_smoke.py`、`test_pipeline.py` | 全6 CLIのfixture動作確認、権利・漏洩・重み・収束・出力保護の回帰試験 |
+| `Core/Tests/CoreTests/TrainingTests/AutoMixedTrainingBridgeTests.swift` | 固定Converterの実 `ComposingText` と `ProtectedSpanDetector` によるオフライン入力検証。Zenzaiは呼ばない |
+| `Core/Tests/CoreTests/AutoMixedTests/TrainingExportParityTests.swift` | fitしたfixtureモデルのv1/v2各128ベクトル、Viterbi path、v2保護・保留21ケースのPython／Swift一致 |
+| `Tools/AutoMixedTraining/TRAINING.md`、同README | CLI、承認manifest、分割・増強契約、環境、評価範囲、未実装部分を記載 |
+
+学習用依存はプロジェクト内の `build/auto-mixed/training-env/` に導入した。Python 3.11.9、scikit-learn 1.9.1、NumPy 2.4.6、SciPy 1.17.1、jsonschema 4.26.0ほかをlockに保存した。取得したのはライブラリだけで、公開コーパス、入力履歴、追加モデルのダウンロードは行っていない。
+
+### 権利・漏洩防止と仕様の具体化
+
+approvedモードは、source_id、license_id、取得日、出典、用途、確認者・確認日、加工／group規則、プライバシー確認、原本と確認資料のSHA-256を要求する。レコードのprovenanceとの照合も行う。承認の記載と証拠の一致を検証する実装であり、ライセンス適合性を自動審査するものではない。実コーパスへの承認をこの作業で代行していない。
+
+fixtureは原本からcheckpoint、export、評価までfixture扱いを維持し、productionへ昇格するオプションを設けていない。fit済みfixtureのSwift production読込も拒否される。実コーパスがないため、approvedモードの実学習は未実行。approved manifest検証の単体試験では、一時ディレクトリのテスト用承認記録を使い、実コーパス承認とは区別した。
+
+分割は元文groupと近重複をまとめてから70/10/10/10で固定し、その後にvariantとprefixを生成する。同じrawの文脈対照、元文の表記違い・prefixは同じ分割を継承する。別splitの文と重複する増強文は除外して件数を記録する。語彙はtrainのみ、Cはdev、sigmoidはcalibration、decoder設定はdev、最終評価はtestだけを使う。位置sample weightは元レコードごとの合計を1にする。
+
+原本用の `split=unassigned` は今回の入力契約の拡張。既存span schemaには追加せず、学習原本の入口だけで扱う。既にsplit指定された原本を黙って振り直さない。固定dataset/checkpointはhashで対応を確認する。これらは誤操作・改変検知用であり、署名による信頼保証ではない。
+
+初期のvariant生成は標準表の母音終端・かな出力tokenの同義表記に限定した。理由はnや促音の内部規則をPythonへ複製しないため。shi/si、chi/ti、tsu/tu等を生成し、実Converterで変更run全体の読みが一致することを検証する。n・未完入力などは原本を保持し、増強を省く。prefixはASCII間の境界だけを使い、結合文字やZWJを途中で切らない。全Unicode書記素への増強は未対応。
+
+`evaluate --traces` は今回、実打鍵ログの読込ではなくASCII原本の全prefix再生を行うフラグとした。各prefixの特徴と保護maskを再計算し、完成文の未来情報を流用しない。実アプリの打鍵ログを取得していないため、この限定を設けた。IMK・Zenzai・表示ヒステリシス・p95/RSSは未評価。v1/v2の保留条件も異なるため、smoke結果を同条件の品質比較とは扱わない。
+
+### 実行した検証
+
+最終の一連の成果物とログは `build/auto-mixed/training-final/`。内容はfixture由来で、権利確認済み本番モデルではない。
+
+| 検証 | 結果 |
+|---|---|
+| 変更前のfixture形式・既存parity | 50 span＋5 context対照をschema検証。pure Core **40件通過**。`training-baseline.log` |
+| 初回の依存導入 | sandbox内の名前解決でpip取得失敗。許可されたネットワーク実行で隔離venvへ導入成功。`training-install.log` と `training-install-network.log` |
+| validate-data／build-dataset | 提供55原本を受理。48 groupを45成分へ統合し、成分はtrain32/dev5/calibration4/test4へ分割。55原本＋27 variant＋213 prefixの計295行、cross-split衝突の増強57行を除外 |
+| 実Swiftによる増強検証 | 全variantの変更runが元runと同じ読みになること、全行の保護maskを実コードで確認。専用bridgeテスト **1件通過**。Zenzai推論・学習は未実行 |
+| train／calibrate／export／evaluate | v1とv2で全CLI完走。train896位置、dev36位置、calibration16位置、test26位置の**fixture動作確認**。出力kindは両方fixture、評価区分はfixture_smoke_only、release_ready=false |
+| test prefix replay | fixtureのASCII原本5件について各prefixを再計算。IMK打鍵や速度の実測ではない。反転数を品質改善の根拠には使っていない |
+| Python全テスト | **16件通過**（既存5＋今回11）。test/calibrationのlabel変更がfit結果へ影響しないこと、testを除いても校正結果が変わらないこと、未承認・fixture昇格・group漏洩・非収束・既存出力上書きの拒否を検証 |
+| fit済みfixtureのSwift parityを含むpure Core | **41件／9 suite通過**。各versionで128件のfeature/active index/logit/p、9 decoder path、追加のv2保護・保留21ケースを検証。logit/pの許容誤差は従来どおり1e-12未満 |
+| 既存Coreを含むnative回帰 | **112件中111件成功、offline bridge 1件は専用環境変数なしでskip**。bridge自体は上記の別実行で成功。ユーザー設定を書き換える `testOptionPunctuationMappings` は従来どおり別途除外。`training-core-final.log` |
+| 旧reference／移行資料reference | **22件／24件通過**。移行資料のvalidatorはschemaを含め成功。`training-reference-v1.log`、`training-reference-migration.log` |
+| 静的確認 | Python全ソースのparse、tracked／新規ファイルの空白検査、新旧提供資料checksum一致。既存goldenやテスト期待値は変更していない |
+| 報告文lint | natural-japaneseのlintは `sudachipy` 不足で失敗。報告を手動で通読した。学習・コード検証とは別の制約 |
+
+学習経路の単体・結合テストに失敗はなかった。非収束は意図した負例としてエラーを確認した。Swift検証中に依存のDEBUG出力を確認したため、最終版では専用processの本文処理中にstdout/stderrを抑止した。最終ログにそのcomposition出力がないことも確認した。
+
+SwiftPMの既定ビルド方式でのllama署名問題は未解決で、native方式を使った。通常のmacOSアプリbuild／GUI、Linux、SwiftLintは今回未実行。実学習データ、学習品質、モデルの配布適合性、実Zenzai、実入力欄の文脈取得、T7の性能・プライバシーgateも未検証。
+
+### 次の作業
+
+[学習手順](Tools/AutoMixedTraining/TRAINING.md) の承認manifestに、責任者が確認した実データと確認記録を指定すれば、fixtureと別の経路で準備を開始できる。少数fixtureのfit結果を本番モデルへ流用しない。十分な元文group、校正用の両class、独立testを揃え、注釈・権利・近重複を確認する必要がある。
+
+次は実コーパスの用意とレビュー、その後の学習・校正・独立評価・失敗例分析。同条件のv1/v2比較とT4以降の統合が揃うまでT3完了や判別性能を宣言しない。機能OFFを維持し、通常使用中のIMEのインストール・削除・登録変更は行っていない。

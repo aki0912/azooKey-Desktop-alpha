@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "mode": "approved",
+  "seed": 20260923,
+  "augmentation": {"max_variants": 2, "max_prefixes": 8},
+  "sources": [{
+    "source_id": "replace-with-reviewed-source-id",
+    "records": {"path": "data/annotated.jsonl", "sha256": "REPLACE_WITH_SHA256"},
+    "approval": {
+      "status": "pending_review",
+      "reviewer": "",
+      "reviewed_at": "",
+      "license_id": "",
+      "source_url": "",
+      "retrieved_at": "",
+      "allowed_uses": [],
+      "evidence": {"path": "rights/review-and-license.txt", "sha256": "REPLACE_WITH_SHA256"},
+      "grouping_rule": "",
+      "processing": "",
+      "privacy_reviewed": false
+    }
+  }]
+}
