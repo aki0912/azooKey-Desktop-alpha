@@ -16,6 +16,7 @@ from auto_mixed_reference import stable_sigmoid, viterbi
 from dataset import load_dataset
 from pipeline_io import (HERE, ROOT, SPLITS, encoded, environment, fields, fingerprint,
                          integer, number, read, require)
+from sample_weighting import row_position_weights, validate_weighting, weighting_audit
 
 VERSIONS = ("anchored-char-v1", "anchored-context-v2")
 
@@ -51,19 +52,18 @@ def vocabulary(rows, version, maximum):
     return sorted(ranked, key=lambda key: key.encode("utf-8"))
 
 
-def matrix(rows, version, vocab):
+def matrix(rows, version, vocab, sample_weighting=None):
     index = {key: i for i, key in enumerate(vocab)}
-    counts = Counter()
-    for row in rows:
-        counts[row["original_id"]] += len(positions(row["record"]))
+    sizes = [len(positions(row["record"])) for row in rows]
+    per_position = row_position_weights(rows, sizes, sample_weighting)
     columns, offsets, target, weights = [], [0], [], []
-    for row in rows:
+    for row, weight in zip(rows, per_position):
         record = row["record"]
         for position, label in positions(record):
             columns.extend(sorted(index[key] for key in features(record, position, version) if key in index))
             offsets.append(len(columns))
             target.append(label)
-            weights.append(1 / counts[row["original_id"]])
+            weights.append(weight)
     return (csr_matrix((np.ones(len(columns), dtype=np.float64), columns, offsets), shape=(len(target), len(vocab))),
             np.array(target, dtype=np.int64), np.array(weights, dtype=np.float64))
 
@@ -90,7 +90,9 @@ def validate_config(config):
     context_field = "missing_context_increment" if config["schema_version"] == 1 else "enter_ja_without_context_grid"
     fields(config, ("schema_version", "seed", "feature_spec_version", "vocabulary_max_features", "logistic_C_grid",
                     "max_iter", "tolerance", "switch_penalty_grid", "enter_ja_grid", "hold_ja",
-                    context_field, "minimum_ja", "minimum_path_margin"))
+                    context_field, "minimum_ja", "minimum_path_margin"), ("sample_weighting",))
+    if "sample_weighting" in config:
+        validate_weighting(config["sample_weighting"])
     require(config["feature_spec_version"] in VERSIONS, "unknown feature specification")
     integer(config["seed"], 0, 2**32 - 1)
     integer(config["vocabulary_max_features"], 1, 32768)
@@ -186,7 +188,8 @@ def train(data, config):
     training, dev = rows_for(data, "train"), rows_for(data, "dev", True)
     vocab = vocabulary(training, version, config["vocabulary_max_features"])
     require(vocab, "training vocabulary is empty")
-    x, y, weights = matrix(training, version, vocab)
+    weighting = config.get("sample_weighting")
+    x, y, weights = matrix(training, version, vocab, weighting)
     dx, dy, dw = matrix(dev, version, vocab)
     require(len(dy) and set(dy) == {0, 1}, "dev needs both labels")
     trials = []
@@ -199,6 +202,12 @@ def train(data, config):
                     config=config, environment=env, chosen_C=strength, selection_partition="dev",
                     vocabulary_partition="train", groups=data["groups"],
                     sample_weight="each original contributes total weight 1 across all eligible positions/variants/prefixes")
+    if weighting is not None:
+        sizes = [len(positions(row["record"])) for row in training]
+        manifest["sample_weight"] = dict(policy=copy.deepcopy(weighting), partition="train",
+            original_total_mass=1, missing_family="all mass to the remaining eligible family",
+            dev_and_calibration="unchanged original-only uniform position weights",
+            audit=weighting_audit(training, sizes, row_position_weights(training, sizes, weighting)))
     model = dict(schema_version=1 if version == VERSIONS[0] else 2, feature_spec_version=version,
                  kind="fixture" if data["mode"] == "fixture" else "production",
                  model_version="offline-candidate-" + fingerprint(manifest)[:16], positive_label="JA_ROMAN",

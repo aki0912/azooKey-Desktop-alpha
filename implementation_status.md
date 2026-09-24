@@ -1420,3 +1420,45 @@ macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。SwiftPM cache警告・na
 macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。SwiftPM cache権限・native build非推奨等の既存警告あり。SwiftLintは未導入のため未実行。比較用のCore内一時リンクは削除し、ソースとログはbuild内に保存した。最終 `git diff --check` 成功、モデルSHA不変と資料の参照先を確認した。
 
 今回依頼された境界修正と入力途中評価は実装・検証済み。新候補は残る8 assertion失敗の整理が必要で、採用済みとはしない。用途別の学習重み、漢字／かな変換区間、空文脈の仕様、複数の埋込み英単語の同時探索は未変更。アプリbuild・IME反映・実Mach XPC・実機打鍵・長時間利用・独立test品質評価は未実施。通常IMEおよびMixedのインストール・削除・登録・利用者設定を変更せず、実際の入力本文／文脈も取得していない。
+
+## 作業ブランチの保存とprefix重みの比較（2026-09-25）
+
+利用者の「別のブランチを作って未コミットの変更をコミットして、次の作業を進めて」に対応。`codex/t0t1` のHEAD `362fa25b9dc66f5df4e096ced74bffda1747d2db` から `codex/mixed-prefix-regressions` を作成した。既存の未コミット変更31ファイル（記号コーパス・調査・英単語抽出・入力途中評価を含む）を、差分検査後 `60ac059` にコミットした。元ブランチや既存モデルを巻き戻していない。AGENTS・実装記録・04/06章・退行調査・実際の学習処理とテストを確認した。
+
+次の小さな作業は、前回調査で判明した「記号・文脈variantの追加でprefixの学習重みが薄まる」問題への任意設定と比較学習とした。漢字／かなの表示規則を同時変更せず、重みの影響を分けて評価した。
+
+### 変更と互換性
+
+`Tools/AutoMixedTraining/sample_weighting.py` を追加し、学習configのoptional `sample_weighting={"policy":"prefix-mass-v1","prefix_fraction":0.5}` を `learning.py` から扱う。各train原文の総重み1をprefix群と非prefix群へ配分し、各群の対象位置へ均等に割り当てる。一方に対象位置がなければ残る群へ全重みを配り、両群とも対象なしなら学習から除く。未知policy・増強種別、0/1・非有限比率、train以外への指定を拒否する。監査集計と規則を学習manifestに保存する。
+
+設定省略時は従来式を維持。既定config、dev・calibrationの原文のみの重み、test、元文group、原文・variant・prefix生成、モデルschema、特徴量v1/v2・LR/Viterbi・goldenは変更しない。比較用の `prefix_weighted_config.json` は前候補と同じ探索条件に配分だけを追加した。用途間の配分が変わるため記号の寄与が減ること、0.5は最適値ではないこと、文脈variant由来のprefixは今回増やしていないことを04章に記録した。同章に残っていた「ローマ字として成立すればsubstring探索しない」という旧記述も、前回実装済みの条件付き辞書探索と一致させた。
+
+旧設定を修正後のコードで再学習すると、930原文候補の語彙・全係数・切片・fit reportを完全一致で再現した。デフォルト経路の数値差は0。候補は別artifactとして保存し、既存モデルやIMEへ反映していない。
+
+### 実学習とdev比較
+
+同じsealed dataset SHA `ec912fd6d4731d141604f5b7012a0ccb5cd5cc8d58b32a40dd5f09fc2a80e2e3` を使用。train642原文中、両群に対象位置あり586件・非prefixのみ28件・対象なし28件。総重み614を維持し、prefixの重みは234.2676→293。新データの収集・ダウンロードやtestの再採点はしていない。
+
+候補SHAは `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22`。Cはdevで10、校正は独立calibration、文脈別閾値はdevでともに0.99、hold0.65・切替ペナルティ0。品質基準と既存テストの期待値は維持した。`release_ready=false`。
+
+前候補と同じdev100原文で、完成文の判定器JA recallは52.25%→54.54%、precision100%・英語破壊0/155は不変、保留率33.33%→31.71%。実Swiftの日本語優先を含む入力途中評価では、完成した英語spanの日本語化が139/2,596（5.35%）→135/2,596（5.20%）、既存位置のkind変化924→834。ただしJA recallは96.36%→96.25%、precision95.47%→95.41%、追加と貼り付けの差3→6件、追加と削除の差6→8件となった。改善は一様ではない。同じ100原文の相関した8,024 snapshotであり、独立した精度試験ではない。
+
+関連回帰では既存8 assertion失敗のうち5件が解消した。内訳は下位adapterのasitan／asitanoとpending n表示の4件、空文脈noteの1件。一方、asitanxの「日本語区間を含めない」負例が新しく失敗した。先頭asitaの平均スコアが採用基準を通り、後続nxと別扱いになるため。通常辞書のasitanote／madeの表記とmadeの区間kindの3件は残り、計4 assertion失敗。失敗数減少だけで合格とはしない。
+
+実測時間は旧設定の再現学習49.075秒、新候補の学習・C選択50.008秒、校正・閾値選択1.773秒、export0.677秒、実Swiftのdev入力途中評価121.367秒、比較全体222.931秒。成果物は `build/auto-mixed/prefix-mass-20260925/`。詳細と再実行CLIは [PREFIX_WEIGHTING.md](Tools/AutoMixedTraining/PREFIX_WEIGHTING.md)。
+
+### 検証・失敗・修正
+
+以下のログ名は上記成果物ディレクトリからの相対名。
+
+- 重み単体5試験成功・0.005秒。記号／文脈variantが増えてもprefix重みが不変、元文総重み、欠けた群・対象なし、旧数値互換、行順・長さ、拒否条件を確認した。
+- Python初回は71件・1失敗・8skip・16.104秒（`python-first.log`）。既存40候補用の検証へ誤って105候補の過去artifactを渡したため。40候補の過去artifactに訂正した再実行も、現在のPython実装fingerprintが当時と違うことで完全一致比較1件が失敗（`python-final.log`、11.847秒）。期待値を緩めず、同じ40候補設定で検証用artifactを新しい出力先へ作った。係数・校正を固定したdevだけの閾値再検証で、testや採用モデルは変更していない。
+- fixture55原文／297行でv1/v2のCLI学習・校正・export・fixture評価を実行。新しい検証用artifactを使ったPython最終は71件中63件成功・8skip、12.154秒（`fixture-smoke/python-tests.log`）。新規の実fit対照でtest/calibrationのラベル変更が学習へ影響しないこと、test除外が校正へ影響しないこと、fixture隔離を確認。閾値だけの再探索で学習配分を変更できないことも検証した。
+- fixture smokeの最後のpure Core検証は、`MixedPunctuationTests.swift` が辞書モジュールをimportしているのにpure用ディレクトリに置かれていたためコンパイル失敗（`fixture-smoke/swift-parity.log`）。本体コードやテスト期待値を変えず、同ファイルを `InputUtilsTests/` へ移した。純粋Core用の対象から分離し、通常Core試験では引き続き全ケースを実行する。最後のparity手順を再実行し44件・9 suite成功、skipなし・1.382秒（`parity-final.log`）。v1/v2特徴量・Viterbi・新fixture exportと承認済みv1／新v2 exportのPython/Swift比較を含む。最初のsmoke一括実行自体を成功と書き換えず、修正後の末尾手順成功として区別する。
+- 新候補の関連Core回帰と承認済みexport parityはrunner集計36件・5skip・4 assertion失敗、29.238秒（`core-candidate.log`）。失敗は上記のとおり。exportの数値parity、meeting、通常辞書の句点試験は成功した。
+- 新候補の実Zenzaiは4件・3 suite成功、skipなし・12.286秒（`zenzai-candidate.log`）。ホスト側の隔離セッション、実GGUF、backend ready、学習OFFで、meeting追加／削除／全体入力、既存日本語表示、`asitanotennkiwoosiete.` → `明日の天気を教えて。`、下位adapterの未完nを確認した。実IMK打鍵ではない。
+- テスト移動後の既存モデルによる広いCore回帰はrunner集計186件・24 suite成功、15件条件skip、23.184秒（`core-current-final.log`）。ユーザー設定を書き換える `testOptionPunctuationMappings` と、既知の旧モデル句点問題 `PunctuationModelRegressionTests` を明示的に除外した。移動した記号試験と新旧exportの数値比較を含む。186件すべてを実行済みとはしない。
+
+環境はmacOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9、依存lockは不変。SwiftPM cache権限・native build非推奨の既存警告あり。SwiftLintは未導入で未実行。最終 `git diff --check` 成功、移動したテストの内容がbyte単位で同一であることと、既存2モデルのSHA不変を確認した。評価reportへraw/contextを保存せず、アプリの本文・文脈・入力履歴を収集していない。
+
+配分設定と比較検証は完了したが、新候補は未採用。残る表記・変換区間の問題と新しいasitanxの負例を整理する必要がある。新モデルのアプリbuild・実Mach XPC・IME反映・実機打鍵・長時間利用・独立test品質評価は未実施。通常IMEおよびMixedのインストール・削除・登録・ユーザー設定は変更していない。

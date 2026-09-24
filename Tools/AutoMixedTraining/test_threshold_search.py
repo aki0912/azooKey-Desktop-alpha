@@ -143,7 +143,8 @@ class FrozenThresholdRunTests(unittest.TestCase):
 
     def test_rejects_unrelated_changes_fitted_inputs_and_existing_output(self):
         for field, value in (("seed", 1), ("minimum_ja", .2), ("minimum_path_margin", 0),
-                             ("switch_penalty_grid", [0]), ("hold_ja", .1), ("logistic_C_grid", [1])):
+                             ("switch_penalty_grid", [0]), ("hold_ja", .1), ("logistic_C_grid", [1]),
+                             ("sample_weighting", dict(policy="prefix-mass-v1", prefix_fraction=.5))):
             with self.subTest(field=field), self.assertRaises(PipelineError):
                 tune_thresholds(self.original, self.data, dict(self.config, **{field: value}))
         with self.assertRaises(PipelineError):

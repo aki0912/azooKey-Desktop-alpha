@@ -216,6 +216,25 @@ class FittedPipelineTests(unittest.TestCase):
             with self.assertRaises(PipelineError):
                 load_checkpoint(path, self.data)
 
+    def test_prefix_weighting_keeps_fixture_taint_and_heldout_independence(self):
+        config = dict(self.config, sample_weighting=dict(policy="prefix-mass-v1", prefix_fraction=.5))
+        fitted = train(self.data, config)
+        changed = copy.deepcopy(self.data)
+        for row in changed["rows"]:
+            if row["record"]["split"] in ("test", "calibration"):
+                for span in row["record"]["spans"]:
+                    if span["label"] in ("RAW", "JA_ROMAN"):
+                        span["label"] = "RAW" if span["label"] == "JA_ROMAN" else "JA_ROMAN"
+        self.assertEqual(fitted, train(changed, config))
+        calibration = calibrate(fitted, self.data)
+        without_test = dict(self.data, rows=[r for r in self.data["rows"] if r["record"]["split"] != "test"])
+        self.assertEqual(calibration, calibrate(fitted, without_test))
+        self.assertEqual(calibration["model"]["kind"], "fixture")
+        weighting = fitted["training_manifest"]["sample_weight"]
+        self.assertEqual(weighting["policy"], config["sample_weighting"])
+        self.assertEqual(weighting["partition"], "train")
+        self.assertFalse(calibration["release_ready"])
+
     def test_nonconvergence_fails_instead_of_exporting_partial_fit(self):
         config = dict(self.config, max_iter=1, tolerance=1e-12)
         from sklearn.exceptions import ConvergenceWarning

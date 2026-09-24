@@ -109,6 +109,8 @@ devでは英語span破壊率0.5%以下の候補からJA recallを優先する。
 
 ## 評価と残る作業
 
+2026-09-25に任意の学習config `sample_weighting` を追加した。`prefix_weighted_config.json` は930原文候補と同じ探索条件に、`{"policy":"prefix-mass-v1","prefix_fraction":0.5}` だけを足した比較用設定。各train原文の総重み1のうち指定比率をprefixへ予約し、残りを原文・完成文variantへ配る。各群内は学習対象のASCII英字位置へ均等配分。一方に対象位置がなければ残る群へ全重みを配り、両方なければ対象外とする。dev・calibration・testへはこの配分を適用しない。省略時の従来計算と既存の既定configは保持する。増強数・split・feature/model schemaは不変で、校正・閾値選定は従来と同じ独立区画からやり直す。結果と制約は [prefix重みの比較](PREFIX_WEIGHTING.md) を参照。
+
 2026-09-25に `evaluate-typing` を追加した。モデル単体の完成文指標と異なり、実ローマ字判定・辞書・日本語優先・hysteresisを含む。本文・文脈をreportへ保存せず、一般データでは最終の漢字表記を採点しない。devだけを使い、testの再採点や閾値自動選択は行わない。`train_punctuation.py` はexport後に `typing_dev.json` の出力まで実行する。比較資料として確認し、既知の表示回帰試験と合わせて採用判断する。`release_ready=false` は維持する。既存の `evaluate --traces` のv1/v2数値回帰や学習重みは変更していない。[変更前後の比較と再実行手順](TYPING_EVALUATION.md) を参照。
 
 2026-09-24に、記号を考慮した230原文を追加し、930原文からv2を再学習した。今回の句点による表示崩れは実Zenzaiで解消したが、既存入力の回帰と保留増加があり未採用。[記号コーパス・時間・比較結果](punctuation_expansion/README.md) を参照。任意の `augmentation.boundary_policy` を指定した場合のみ、group分割後の句読点・括弧・空文脈対照を生成する。元文の重み、既存schema、fixture隔離、通常の未指定経路は維持する。
