@@ -1462,3 +1462,30 @@ macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。SwiftPM cache権限・na
 環境はmacOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9、依存lockは不変。SwiftPM cache権限・native build非推奨の既存警告あり。SwiftLintは未導入で未実行。最終 `git diff --check` 成功、移動したテストの内容がbyte単位で同一であることと、既存2モデルのSHA不変を確認した。評価reportへraw/contextを保存せず、アプリの本文・文脈・入力履歴を収集していない。
 
 配分設定と比較検証は完了したが、新候補は未採用。残る表記・変換区間の問題と新しいasitanxの負例を整理する必要がある。新モデルのアプリbuild・実Mach XPC・IME反映・実機打鍵・長時間利用・独立test品質評価は未実施。通常IMEおよびMixedのインストール・削除・登録・ユーザー設定は変更していない。
+
+## 回帰テストの契約訂正（2026-09-25）
+
+利用者の「明日nxで正解」「テストが変なら修正して」に対応。開始時は `codex/mixed-prefix-regressions`、HEAD `d2554d6ba01fc2287259741c6efc5cf45a5285dc`、working treeはclean。会話とユーザー共通AGENTS、実装記録、05章・06章・退行調査、実際の判定器・reading parser・converter・失敗したテストを照合した。製品の判定器・表示・モデルを変更せず、内部kindを表示仕様と混同した期待値を訂正する。
+
+### 変更理由と影響
+
+- `PendingRomanTailTests` の学習済みモデル負例から `asitanx` を外した。既存の人工スコア試験は元から `asita` とpending suffix `nx` を認めており、「日本語区間を一つも含めない」という条件は旧モデルの結果を固定したものだった。代わりに `JapanesePreferredTests` へ通常辞書／実Zenzaiの2試験を追加。実際のinsertで「明日 → 明日n → 明日nx」、Backspace・再入力・貼り付け・表示確定・Escapeによる原文確定を検証する。raw完全保持、範囲の全被覆、変換対象 `[0,5)`、非fallback、session解放も確認。`nx` の削除・補正は許容せず、一つのspanか複数spanかは固定しない。他の英語・不成立ローマ字・保護tokenの負例と、人工スコアでの採用条件は維持。
+- `made`／`to` の言語判定試験を「japaneseKanaのみ」から「全範囲が日本語、読みがまで／と、pending suffixなし」へ変更した。japaneseRomanは既存仕様で許された変換経路であり、日英判定だけで漢字／かなの最終表記を固定すべきではないため。英語文中の曖昧語保持と、人工スコアによるkana／kanji切替試験は不変。
+- 通常辞書の2例だけ、`made` は「まで／間で」、`asitanote` は「明日のて／明日の手」を許容した。追加した独立対照は判定器を迂回した `SegmentsManager` で「間で／明日の手」が先頭になり、madeの候補に「まで」もあることを確認する。かなpreviewと全文の辞書変換の両方を許容する理由を明示し、任意の出力を合格にしない。日本語区間、読み全体、raw保持、非fallback、Escapeの原文復元を追加検証する。
+- 実Zenzaiの `made → まで`、`asitanote → 明日のて` は従来どおり完全一致を要求。`asitanx → 明日nx` も完全一致とした。句点後の「教えて」、meetingの抽出・途中入力の期待値は変更していない。
+
+理由と適用範囲を [05章](docs/azookey_auto_mixed_codex/docs/05_TEST_AND_EVALUATION.md) に追記し、[prefix重み比較](Tools/AutoMixedTraining/PREFIX_WEIGHTING.md) は比較学習時点の4 assertion失敗を履歴として残したうえで、今回の訂正へ案内した。通常辞書のみでも常に「まで／明日のて」を優先させる場合は別の製品仕様・実装変更になる。学習ラベル、v1/v2特徴量、LR/Viterbi、golden、schema、品質目標は変更なし。
+
+### 実行した検証
+
+ログは `build/auto-mixed/test-contracts-20260925/`。すべて隔離したCoreセッション、学習OFF。今回のテスト／コンパイル失敗なし。
+
+- 最初の新候補・通常辞書関連試験：runner24件、19件実行成功・5件条件skip、17.774秒（`candidate-dictionary.log`）。この後、辞書順位の独立対照と2例のEscape確認を追加して次の試験を実行した。
+- 最終の新候補・関連Core回帰：runner40件・7 suite、33件実行成功・7件条件skip、31.667秒（`candidate-core.log`）。従来の4 assertion失敗は訂正後の契約で成功。記号・長音・apple・meeting・pending tail・承認済みv1／候補v2のexport parityを含む。skipは実Zenzai6件とfixture export parity1件で、後者は下記の広い回帰で実行した。
+- 新候補・実Zenzai：5件・3 suite成功、skipなし、13.781秒（`candidate-zenzai.log`）。日本語表示・asitanxの追加／削除／復元・meetingの途中入力・句読点追加後の「教えて」・下位adapterのpending nを確認。実GGUFのbackend readyをassertした。
+- 従来モデル・広いCore回帰：runner189件・24 suite、ログ上174件実行成功、14件条件skipと導入済みIME試験1 suite skip、25.605秒（`baseline-core.log`）。fresh Python参照のv1/v2特徴量・数値parity、fixture／承認済みexport、既存manualを含む。利用者設定を書き換える `testOptionPunctuationMappings` と、既知の旧モデルの句点問題 `PunctuationModelRegressionTests` は前回同様に明示除外。旧モデルの句点問題が直ったという意味ではない。
+- 従来モデル・実Zenzai：4件・2 suite成功、skipなし、5.621秒（`baseline-zenzai.log`）。今回変更した日本語表示・asitanxと、meeting・pending nを確認。旧モデルの句点試験は含めていない。
+
+環境はmacOS 27 arm64／Xcode 27.0（27A266a）／Swift 6.4。SwiftPMのユーザーcache権限、ZIPFoundationの旧watchOS指定、native build非推奨の既存警告あり。SwiftLintはコマンド未導入で未実行。Python参照を再生成したが、学習パイプラインの再学習・単体試験は今回のテスト訂正対象ではなく未実行。`git diff --check` 成功。従来モデルSHA `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` と候補SHA `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22` は不変。
+
+今回のテスト訂正と新旧モデルでの確認は完了。候補の `release_ready=false` と未採用状態は維持し、4 assertionの訂正を精度改善と扱わない。devの入力途中の英語破壊・方向差など前回の指標はそのまま。新たな独立test品質評価、アプリbuild、実Mach XPC、IME反映、実機打鍵、長時間利用は未実施。モデル採用判断にはこれらを別途確認する。通常IMEおよびMixedのインストール・削除・登録・設定は変更せず、実際の入力本文や文脈を取得・記録していない。

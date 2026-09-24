@@ -297,16 +297,39 @@ import Testing
             let spans = try preferred.segment(raw)
             #expect(spans.allSatisfy { $0.kind == .raw || $0.kind == .gap }, "runtime fixture: \(raw)")
         }
-        preferred.reset()
-        #expect(try preferred.segment("made").map(\.kind) == [.japaneseKana])
-        #expect(try preferred.segment("to").map(\.kind) == [.japaneseKana])
+        // This is a language-decision contract. Trained scores may choose either
+        // kana preview or kanji conversion; artificial-score tests fix those gates.
+        for (raw, reading) in [("made", "まで"), ("to", "と")] {
+            preferred.reset()
+            let spans = try preferred.segment(raw)
+            #expect(spans.count == 1)
+            let span = try #require(spans.first)
+            #expect(span.sourceRange == (try ScalarRange(0, raw.unicodeScalars.count)))
+            #expect(span.kind == .japaneseKana || span.kind == .japaneseRoman)
+            let parsed = try #require(RomanSpanReading.parse(TextOffsetMap(raw).slice(span.sourceRange)))
+            #expect(parsed.reading == reading)
+            #expect(parsed.suffix.isEmpty)
+        }
+    }
+
+    @Test func dictionaryRankingForCompleteAmbiguousJapaneseReadings() throws {
+        // Bypass language judgment to establish the pinned dictionary's ranking.
+        let manager = SegmentsManager(kanaKanjiConverter: .withDefaultDictionary(),
+            applicationDirectoryURL: .temporaryDirectory.appendingPathComponent("dictionary-ranking-\(UUID())"),
+            containerURL: nil, context: .init(useZenzai: false, learningEnabled: false))
+        for (raw, reading, first) in [("made", "まで", "間で"), ("asitanote", "あしたのて", "明日の手")] {
+            let candidates = manager.replaceCompositionFromRaw(raw, leftContext: nil, rightContext: nil, rich: false)
+            #expect(manager.convertTarget == reading)
+            #expect(candidates.first?.text == first)
+            if raw == "made" { #expect(candidates.contains { $0.text == "まで" }) }
+        }
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil))
     func trainedJapanesePreferredReplay() throws {
         let bridge = try makeBridge()
         defer { bridge.releaseAll() }
-        try replay(bridge)
+        try replay(bridge, useZenzai: false)
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil
@@ -314,8 +337,68 @@ import Testing
     func realZenzaiJapanesePreferredReplay() throws {
         let bridge = try makeBridge(useZenzai: true)
         defer { bridge.releaseAll() }
-        try replay(bridge)
+        try replay(bridge, useZenzai: true)
         #expect(bridge.backend == .zenzaiReady)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil))
+    func pendingNxKeepsJapanesePrefixAndReversibleRaw() throws {
+        try replayPendingNx(useZenzai: false)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil
+                  && ProcessInfo.processInfo.environment["AUTO_MIXED_ZENZAI_RESOURCES"] != nil))
+    func realZenzaiPendingNxKeepsJapanesePrefixAndReversibleRaw() throws {
+        try replayPendingNx(useZenzai: true)
+    }
+
+    private func replayPendingNx(useZenzai: Bool) throws {
+        let path = try #require(ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"])
+        let model = try LogisticLanguageModel(data: Data(contentsOf: URL(fileURLWithPath: path)))
+        let preferred = try JapanesePreferredSegmenter(model: model, lexicon: .bundled(), policy: .bundled(), focus: UUID())
+        let bridge = try makeBridge(useZenzai: useZenzai)
+        defer { bridge.releaseAll() }
+        let converter = MixedSessionConverter(bridge: bridge, sessionID: UUID(), allowJapaneseReadingFallback: true)
+        let engine = MixedCompositionEngine(segmenter: preferred, converter: converter)
+        func check(_ raw: String, display: String) throws {
+            #expect(engine.buffer.text == raw)
+            #expect(try engine.markedText().text == display)
+            try MixedMarkedTextRenderer.validate(spans: engine.spans, source: TextOffsetMap(raw))
+            #expect(try MixedMarkedTextRenderer.render(raw: raw, spans: engine.spans, rawPreview: true).text == raw)
+            #expect(!engine.usedRawFallback)
+            // The completed prefix must reach the converter; nx must never be
+            // discarded or included in a guessed kanji reading.
+            #expect(converter.lastResults.count == 1)
+            let result = try #require(converter.lastResults.values.first)
+            #expect(result.convertedRange == (try ScalarRange(0, 5)))
+            #expect(result.fallback == nil)
+            #expect(!result.candidates.isEmpty)
+        }
+        for character in "asita" { try engine.handle(.insert(String(character))) }
+        try check("asita", display: "明日")
+        try engine.handle(.insert("n"))
+        try check("asitan", display: "明日n")
+        try engine.handle(.insert("x"))
+        try check("asitanx", display: "明日nx")
+        try engine.handle(.backspace)
+        try check("asitan", display: "明日n")
+        try engine.handle(.backspace)
+        try check("asita", display: "明日")
+        for character in "nx" { try engine.handle(.insert(String(character))) }
+        try check("asitanx", display: "明日nx")
+        #expect(try engine.handle(.enter).commit?.text == "明日nx")
+        #expect(engine.buffer.isEmpty)
+        #expect(bridge.activeChildCount == 0)
+
+        // Reset/paste must agree with typing, independently of prior span kinds.
+        try engine.replaceRaw("asitanx")
+        try check("asitanx", display: "明日nx")
+        try engine.handle(.escape)
+        #expect(try engine.markedText().text == "asitanx")
+        #expect(try engine.handle(.enter).commit?.text == "asitanx")
+        #expect(engine.buffer.isEmpty)
+        #expect(bridge.activeChildCount == 0)
+        if useZenzai { #expect(bridge.backend == .zenzaiReady) }
     }
 
     private func makeBridge(useZenzai: Bool = false) throws -> ZenzaiSpanBridge {
@@ -326,21 +409,43 @@ import Testing
                             }, learningEnabled: false)
     }
 
-    private func replay(_ bridge: ZenzaiSpanBridge) throws {
+    private func replay(_ bridge: ZenzaiSpanBridge, useZenzai: Bool) throws {
         let path = try #require(ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"])
         let model = try LogisticLanguageModel(data: Data(contentsOf: URL(fileURLWithPath: path)))
         let preferred = try JapanesePreferredSegmenter(model: model, lexicon: .bundled(), policy: .bundled(), focus: UUID())
         let converter = MixedSessionConverter(bridge: bridge, sessionID: UUID(), allowJapaneseReadingFallback: true)
         let engine = MixedCompositionEngine(segmenter: preferred, converter: converter)
+        // The pinned dictionary may rank 手 / 間で first when a trained model
+        // admits kanji conversion. Zenzai's exact display contract remains separate.
+        let dictionaryAlternatives = ["asitanote": "明日の手", "made": "間で"]
         for (raw, expected) in [("asita", "明日"), ("asitan", "明日n"), ("asitano", "明日の"),
                                 ("asitanot", "明日のt"), ("asitanote", "明日のて"),
                                 ("sushi", "寿司"), ("made", "まで"), ("to", "と"),
                                 ("asitahameetinggaarimasu", "明日はmeetingがあります")] {
             preferred.reset()
             try engine.replaceRaw(raw)
-            #expect(try engine.markedText().text == expected, "runtime fixture: \(raw)")
+            let display = try engine.markedText().text
+            if !useZenzai, let alternative = dictionaryAlternatives[raw] {
+                #expect(display == expected || display == alternative, "dictionary fixture: \(raw)")
+                #expect(engine.spans.allSatisfy { $0.kind == .japaneseRoman || $0.kind == .japaneseKana })
+                let readings = try engine.spans.map {
+                    try #require(RomanSpanReading.parse(TextOffsetMap(raw).slice($0.sourceRange)))
+                }
+                #expect(readings.allSatisfy { $0.suffix.isEmpty })
+                #expect(readings.map(\.reading).joined() == (raw == "made" ? "まで" : "あしたのて"))
+            } else {
+                #expect(display == expected, "runtime fixture: \(raw)")
+            }
             #expect(engine.buffer.text == raw)
+            try MixedMarkedTextRenderer.validate(spans: engine.spans, source: TextOffsetMap(raw))
             #expect(!engine.usedRawFallback)
+            #expect(converter.lastResults.values.allSatisfy { $0.fallback == nil })
+            if dictionaryAlternatives[raw] != nil {
+                try engine.handle(.escape)
+                #expect(try engine.markedText().text == raw)
+                #expect(try engine.handle(.enter).commit?.text == raw)
+                #expect(bridge.activeChildCount == 0)
+            }
         }
         for raw in ["note", "notes", "meeting", "hello", "design", "menu", "camera", "file", "tomorrow"] {
             preferred.reset()

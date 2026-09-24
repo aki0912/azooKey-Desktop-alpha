@@ -89,8 +89,10 @@ import Testing
             #expect(try adapter.segment(raw).map(\.kind) == [.japaneseRoman], "fixture: \(raw)")
         }
         // No spelling correction: the extra s in assitan is not deleted to force 明日.
+        // asitanx is a valid pending tail, covered by completedPrefixCanCarryOnlyAValidPendingTail
+        // and JapanesePreferredTests' display/editing replay, not an English-only negative.
         for raw in ["assitan", "asian", "ash", "shin", "names", "made", "no", "to", "name", "making", "design", "tomorrow",
-                    "asitan ", "asitanx", "sushin", "https://example.com/asitan"] {
+                    "asitan ", "sushin", "https://example.com/asitan"] {
             #expect(try !adapter.segment(raw).contains { $0.kind == .japaneseRoman }, "fixture: \(raw)")
         }
     }
