@@ -31,7 +31,7 @@ import Testing
                 engine.cancel()
                 for character in raw { try engine.handle(.insert(String(character))) }
                 #expect(try engine.markedText().text == "明日の天気を教えて")
-                for (suffix, display) in [(".", "。"), (",", "、")] {
+                for (suffix, display) in [(".", "。"), (",", "、"), ("?", "？"), ("!", "！")] {
                     try engine.handle(.insert(suffix))
                     #expect(try engine.markedText().text == "明日の天気を教えて" + display)
                     #expect(engine.buffer.text == raw + suffix)

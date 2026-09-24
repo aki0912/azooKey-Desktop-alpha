@@ -61,6 +61,8 @@ public struct MixedPunctuationPolicy: Sendable {
         case "-": return "ー"
         case ".": return "。"
         case ",": return "、"
+        case "?": return "？"
+        case "!": return "！"
         case "[": return "「"
         case "]": return "」"
         default: return nil

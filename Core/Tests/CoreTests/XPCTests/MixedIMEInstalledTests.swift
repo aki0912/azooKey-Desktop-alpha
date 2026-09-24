@@ -122,6 +122,11 @@ private final class ProbeReply: @unchecked Sendable {
                 startsFocus: operation == 1, context: .init(leftSideContext: left), action: action))))
         }
         for (raw, left, expected) in [("asita.", "", "明日。"), ("asita,", "", "明日、"),
+                                       ("asita?", "", "明日？"), ("asita!", "", "明日！"),
+                                       ("asita?!", "", "明日？！"), ("apple?!", "明日", "apple?!"),
+                                       ("?", "明日", "？"), ("!", "明日", "！"),
+                                       ("?", "apple", "?"), ("!", "apple", "!"),
+                                       ("https://example.com/?q=日本語!", "", "https://example.com/?q=日本語!"),
                                        ("asita-", "", "明日ー"), ("[apple]", "", "「apple」"),
                                        ("apple-.,", "明日", "apple-.,"), (".", "明日", "。"),
                                        (".", "apple", "."), ("3.14", "", "3.14"),

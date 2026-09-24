@@ -1511,3 +1511,21 @@ macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。SwiftPM cache権限・na
 初回のsandbox内ではgit indexへの書込みが拒否されたため、そのcommit試行は失敗。ホスト側の許可された実行で同じ5ファイルをコミットした。入力ソースの初回sandbox内照会もHIServicesの接続エラーと不整合な状態を返したため採用せず、ホスト側で再取得した状態だけを更新判断と前後比較に使用した。自動承認レビューによる拒否はなし。ビルド・更新・実サーバー試験の失敗なし。環境はmacOS 27 arm64／Xcode 27／Swift 6.4、既存のSwiftPM・Xcode依存警告は残る。SwiftLintは未導入で未実行。最終差分空白検査は成功。
 
 コミットとMixed版の反映は完了。利用者は入力メニューでMixed（自動）を選んで試用できる状態で、選択操作はこちらでは行っていない。通常版のファイル・設定・辞書・登録を変更していない。実際のアプリ本文・文脈・入力履歴も取得していない。今回の確認は実サーバーに固定例を送った自動試験であり、更新後の実IMK物理打鍵、secure field、長時間利用、未閲覧データでの品質評価・一般配布は未実施。
+
+## 疑問符・感嘆符の全角表示とMixed更新（2026-09-25）
+
+利用者の「？／！も日本語にくっつく時は全角にして欲しい」に対応。開始HEADは `465ce33`、`codex/mixed-prefix-regressions` のworking treeはclean。共通AGENTS、既存記号仕様、実装記録と実際の表示policy・renderer・保護処理を確認した。
+
+`MixedPunctuationPolicy.japanese` へ `? → ？` と `! → ！` の2対応を追加。既存の日本語優先規則を共用し、未確定の日本語区間、取得可能な確定済み日本語の直後、連続記号を全角表示・確定する。英語直後、URL・識別子などの構造保護、数値に接する記号、結合文字の書記素境界は既存規則を維持。原文バッファとモデル入力はASCIIのまま、Escapeで原文に戻せる。manual、学習モデル・特徴量・LR/Viterbi・schema・goldenは変更していない。対象が5記号から7記号へ増えることを01章と `Tools/AUTO_MIXED_IME.md` へ明記した。
+
+### 検証と反映
+
+ログは `build/auto-mixed/question-exclamation-20260925/`。
+
+- 初回の記号Core試験はrunner9件、8件実行成功・実Zenzai1件skip、13.385秒（`core.log`）。その後、既存の括弧削除ケースも保持したループに整理し、疑問符・感嘆符のTab候補／原文候補とUnicode offsetの検証を追加した。
+- 最終の関連Core回帰はrunner38件・6 suite成功、skipなし、47.612秒（`core-final.log`）。実GGUF・backend ready・学習OFFで、`asita? → 明日？`、`asita! → 明日！`、英語・URL・数値・結合文字の原文保持、確定文脈、削除・再入力・Escape・Tabを検証。既存のapple・meeting・pending tail・長音も確認した。句読点安定性試験へ `?`／`!` を追加し、文脈取得不可／空、si／shiの両方で「教えて」が漢字のまま維持されることを通常辞書と実Zenzaiで確認した。
+- 現在のモデルを明示してアプリとhelperをビルドし、資源receipt・ad-hoc署名・deep strict検証成功（`build.log`）。更新dry-run成功後、Mixed専用updateで反映した（`update-dry-run.log` / `update.log`）。更新前後ともmacOS標準日本語が選択されており、Mixedの全モード有効状態と選択中ソースが一致。再登録・再有効化・入力ソース切替はなし。
+- 導入先とビルドのapp／helper／モデルSHAが一致（`hashes-after.json`）。appは `0a3f93ecfd2e664df51c039c17614d49c616c2dbb378c87e568992e48edb4d6b`、helperは `e188a48f75a15c838190868863019f780806c0e2b77b7f8402585c9bd873daa9`。モデルSHAは `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22` で更新前と同じ。診断ログはOFF。旧Mixedアプリのコピーは同ディレクトリの `previous-azooKeyMixed.app` に保存した。
+- 更新済みhelperの実Mach XPC試験4件成功、skipなし、3.594秒（`installed-tests.log`）。既存試験へ日本語・英語直後の `?`／`!`、`?!`、確定左文脈、URL内の記号を追加し、表示・ASCII原文・確定を確認。既存のapple、長音、混在文、commit重複除外も成功した。
+
+テスト・ビルド・更新の失敗なし。macOS 27 arm64／Xcode 27／Swift 6.4、既存の依存・SwiftPM native build・Xcode警告は残る。SwiftLintは未導入で未実行。最終 `git diff --check` 成功。再学習・新たな品質評価は行っておらず、`release_ready=false` は維持。実IMKの物理打鍵・secure field・長時間入力は今回未確認で、実サーバーの固定例試験とは区別する。通常版のファイル・設定・辞書・登録を変更せず、実際のアプリ本文・文脈を取得・記録していない。今回の差分は未コミット、Mixed版には反映済み。
