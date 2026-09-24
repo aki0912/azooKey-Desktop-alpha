@@ -192,7 +192,7 @@ extension ConverterServer {
                 value: .string(Config.OpenAiApiEndpoint().value)
             ),
             descriptor(
-                key: "dev.ensan.inputmethod.azooKeyMac.preference.OpenAiApiKey",
+                key: IMEIdentity.current.keychainAccount,
                 title: "OpenAI APIキー",
                 section: "OpenAI API",
                 kind: .textField(secure: true)

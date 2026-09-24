@@ -9,6 +9,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         self?.apply(response)
     }
     private var mixedModeMenuItem: NSMenuItem?
+    private var selectedInputMode: IMEInputMode = .japanese
     @MainActor var isAutomaticMixedInputActive: Bool { mixedInput.isActive }
     private var currentConverterView: ConverterSessionSnapshot?
     private(set) var inputState: InputState = .none
@@ -49,6 +50,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     private var pinnedPromptsCache: [PromptHistoryItem] = []
 
     func appendDebugMessage(_ message: String) {
+        guard IMEIdentity.current != .mixed else { return }
         NSLog("azooKeyMac: %@", message)
     }
 
@@ -163,11 +165,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
         if let client = sender as? IMKTextInput {
             client.overrideKeyboard(withKeyboardNamed: Config.KeyboardLayout().value.layoutIdentifier)
-            mixedInput.activate(client: client) { [weak self] in
-                guard let self else { return false }
-                return self.inputState == .none && self.pendingKeyEventCount == 0
-                    && self.inputLanguage == .japanese && self.inputStyle == .defaultRomanToKana
-            }
+            activateAutomaticModeIfReady(client: client)
         }
         // Chromium 系アプリで JS コンパイル中に activate された場合、
         // client.attributes(forCharacterIndex:) の同期呼び出しが deadlock を
@@ -222,8 +220,18 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         }
 
         if let value = value as? NSString {
+            guard let mode = IMEInputMode.resolve(value as String, identity: .current) else { return }
+            if selectedInputMode != mode {
+                mixedInput.leaveForManual()
+                mixedInput.deactivate() // also invalidate an in-flight capability probe
+            }
+            selectedInputMode = mode
+            mixedInput.requestedPolicy = mode.compositionPolicy
+            if pendingConverterServerActivation != nil {
+                pendingConverterServerActivation = .init(config: converterServerSessionConfig, inputLanguage: mode.inputLanguage)
+            }
             self.client()?.overrideKeyboard(withKeyboardNamed: Config.KeyboardLayout().value.layoutIdentifier)
-            let englishMode = value == "com.apple.inputmethod.Roman"
+            let englishMode = mode == .roman
 
             if englishMode {
                 mixedInput.leaveForManual()
@@ -249,35 +257,39 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
                     )
                 }
             }
+            if mode == .automatic, let client = (sender as? IMKTextInput) ?? self.client() {
+                activateAutomaticModeIfReady(client: client)
+            }
+        }
+    }
+
+    @MainActor private func activateAutomaticModeIfReady(client: IMKTextInput) {
+        mixedInput.requestedPolicy = selectedInputMode.compositionPolicy
+        guard selectedInputMode == .automatic, !mixedInput.isActive,
+              inputState == .none, pendingKeyEventCount == 0 else { return }
+        mixedInput.activate(client: client) { [weak self] in
+            guard let self else { return false }
+            return self.selectedInputMode == .automatic && self.inputState == .none
+                && self.pendingKeyEventCount == 0 && self.inputLanguage == .japanese
+                && self.inputStyle == .defaultRomanToKana
         }
     }
 
     override func menu() -> NSMenu! {
-        if let resources = Bundle.main.resourceURL, AutoMixedExperiment.configuration(in: resources) != nil {
+        if IMEIdentity.current == .mixed {
             if mixedModeMenuItem == nil {
-                let item = NSMenuItem(title: "自動日英入力（実験）", action: #selector(toggleMixedInput), keyEquivalent: "")
-                item.target = self
+                let item = NSMenuItem(title: "自動：Spaceは空白・Tabは候補", action: nil, keyEquivalent: "")
                 item.toolTip = "Spaceは空白、Tabは候補。英字のみの入力中もTabではフォーカス移動しません。"
+                item.isEnabled = false
                 mixedModeMenuItem = item
                 appMenu.insertItem(item, at: 0)
             }
-            MainActor.assumeIsolated { mixedModeMenuItem?.state = mixedInput.isActive ? .on : .off }
+            MainActor.assumeIsolated {
+                mixedModeMenuItem?.title = selectedInputMode == .automatic && !mixedInput.isActive
+                    ? "自動：現在は日本語入力（準備中／利用不可）" : "自動：Spaceは空白・Tabは候補"
+            }
         }
         return self.appMenu
-    }
-
-    @MainActor @objc private func toggleMixedInput() {
-        if mixedInput.isActive {
-            mixedInput.requestedPolicy = .manual
-            mixedInput.leaveForManual()
-        } else if inputState == .none, pendingKeyEventCount == 0, let client = self.client() {
-            mixedInput.requestedPolicy = .automaticMixed
-            mixedInput.activate(client: client) { [weak self] in
-                guard let self else { return false }
-                return self.inputState == .none && self.pendingKeyEventCount == 0
-                    && self.inputLanguage == .japanese && self.inputStyle == .defaultRomanToKana
-            }
-        } else { NSSound.beep() }
     }
 
     // swiftlint:disable:next cyclomatic_complexity
@@ -433,6 +445,8 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
                     self.appendDebugMessage("Consumed delayed fallthrough event \(request.eventID)")
                 }
                 self.apply(response)
+                // A mode change during manual composition takes effect after its commit.
+                if let client = self.client() { self.activateAutomaticModeIfReady(client: client) }
             }
         }
         return true
@@ -536,12 +550,14 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor func switchInputLanguage(_ language: InputLanguage, client: IMKTextInput) {
         self.inputLanguage = language
+        selectedInputMode = language == .english ? .roman : .japanese
+        mixedInput.requestedPolicy = .manual
         client.overrideKeyboard(withKeyboardNamed: Config.KeyboardLayout().value.layoutIdentifier)
         switch language {
         case .english:
-            client.selectMode("dev.ensan.inputmethod.azooKeyMac.Roman")
+            client.selectMode(IMEInputMode.roman.identifier(for: .current))
         case .japanese:
-            client.selectMode("dev.ensan.inputmethod.azooKeyMac.Japanese")
+            client.selectMode(IMEInputMode.japanese.identifier(for: .current))
         }
     }
 

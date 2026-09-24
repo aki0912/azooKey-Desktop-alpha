@@ -1,6 +1,6 @@
 # Auto Mixed Input 実装状況
 
-2026-09-24時点。**T0〜T2と実ZenzaiのT4は検証済み。混在入力の試用アプリが動作し、今回T5のConverterServer／IMK接続を実装してアプリ全体のビルドまで通した。実機IMEとしての入力確認と隔離配布は未完了。通常ビルドの自動混在入力はOFF。** 最新記録は末尾の「T5：IME接続を実装、実機確認待ち」を参照。
+2026-09-24時点。**T0〜T2と実ZenzaiのT4は検証済み。通常版と分離した3モードのazooKey Mixedをビルド・ローカル署名・インストールし、専用Mach XPCで実変換を確認した。ただしmacOSの親入力ソースが有効にならず、IMEとしての打鍵確認は未実行。再ログイン後の有効化確認が必要。通常ビルドの自動混在入力はOFF。** 最新記録は末尾の「通常版と併用するazooKey Mixed」を参照。
 
 計700原文（増強後3,907行）でv1/v2のLR学習・校正・exportは実施済みだが、品質基準未達のためT3全体は未完了、候補モデルはrelease_ready=false。追加650件の人手確認も未実施。fixtureと候補モデルのPython／Swift数値一致を確認したことと、実入力での判別性能・v2の優位性を区別する。T6全体・T7/T8は未完了。以下の各stageは当時の資料パス・実行結果を含む履歴である。
 
@@ -955,3 +955,56 @@ native方式の非推奨、既存weak capture、macOS 13とllama最低13.3の差
 T6の中央編集・任意区間の原文／JA強制、複数spanでの対象選択、長時間のjournal/commit ledger上限・遅延、T7の広範な精度・性能・RSS・全ログ監査、T8の署名・配布権利表示・戻し方も残る。auto中の未対応キーはconsumeされ得る。追加650原文の人手確認とT3品質gateも未解決。実際の学習モデルの判別性能、日常使用の安定性は主張しない。
 
 通常IMEのインストール・削除・登録、LaunchAgent、ユーザー設定は変更していない。既存ユーザー変更の破棄はない。機能マーカーは分離した開発appの中だけに作成した。ユーザーの実入力・文脈は収集せず、試験ログはタスクで提示された例文と人工fixtureだけを使った。
+
+## 通常版と併用するazooKey Mixed（2026-09-24）
+
+利用者の「おすすめの方法で進め、アプリも通常版と併用できるよう変更する」という依頼に対応した。開始HEADは `e1f7d30f0016d5792c5e9c68d12d2b816ecc82d9`、git statusはclean。会話のAGENTS指示と現行仕様03/06/07章、前節のT5記録、試用手順を確認した。T0〜T2・T4を作り直さず、モデル・辞書・学習データ・依存revision・v1/v2特徴量・LR・Viterbi・goldenは維持した。
+
+### 変更と仕様差分
+
+- `IMEIdentity` を追加し、アプリと埋め込みhelperのbundleからidentityを解決する。通常版のbundle/Mach service/AppGroup/保存先は従来値を維持。試験版は `azooKeyMixed.app`、表示名 `azooKey Mixed`、bundle ID `dev.azookey.inputmethod.azooKeyMixed` とした。Mach serviceとLaunchAgentも同prefixの `.ConverterServer` に分離した。
+- MixedのUserDefaults、ユーザー辞書、学習領域、カスタム入力表、APIキーのKeychain accountを独立させた。通常版から自動コピーせず、設定の欠損を通常UserDefaultsから補うこともしない。helperの副作用なし `--identity` を導入前に照合する。
+- 以前の実験用チェックメニューを、Mixed専用の **自動・日本語・英数の3入力モード**へ変更した。日本語／英数は既存manual経路。自動への切替時にmanual compositionがあれば確定後から有効にする。英数／かなキーは各manualモードへ戻る。通常版に自動モードは追加しない。
+- 起動直後にmanualへ流れて混在入力を逃すことを防ぐため、capability交渉中の打鍵をメモリ内で保持し、旧commandで対応を確認後に順番に送る。失敗時は元の欄へrawを一度だけ回復する。GGUF/Metal初期化を考慮しauto要求のみ5秒、従来manualの1秒設定は維持した。待ち時間を延ばしたことで障害時の復旧が遅くなるが、無制限再送はしない。性能要件を満たしたという意味ではない。
+- 証明書照会では有効なcodesigning identityが0件だった。**このMac用のad-hoc署名・App Sandbox/App Groupなし**のprofileを追加し、専用 `Library/Application Support/azooKeyMixed` 以下へ保存する。正式配布のAppGroup/Developer ID署名・公証とは分離した仕様差分で、通常版のsandboxやOSのセキュリティ設定は変更しない。
+- `Tools/build_mixed_ime.py` は分離ビルド、既存receiptの5資源を検証、学習済みexportの配置、ローカル署名、strict検証、制御CLIの生成を行う。欠損source資源への一時リンクは自分で作ったものだけfinallyで削除する。`Tools/install_mixed_ime.py` は専用アプリとLaunchAgentだけを対象にし、異なるidentity・symlinkを拒否。失敗時は旧Mixedファイルとjobへ復旧する。削除でも辞書・設定・APIキーは残す。通常版用 `install.sh` は実行していない。
+- Mixedのアプリdebug入力記録を止め、helperとLaunchAgentのstdout/stderrも破棄する。raw・文脈・journalをログや学習データへ保存する処理は追加していない。確定学習OFF、T3品質未達、全ログ監査未完了は維持する。
+
+runtime modelはschema 2、`anchored-context-v2`、`offline-retuned-302c6220b7f569e5`、SHA-256 `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581`。引き続き `release_ready=false`。`kind=production` を品質合格とは扱わない。学習・コーパス取得・閾値調整は行っていない。
+
+### 実施した検証
+
+macOS 27.0 arm64、Xcode 27、Swift 6.4、Python 3.11.9。キャッシュと生成物は `build/auto-mixed/`。Coreはnative方式。IMK boundaryの独立harnessは実アプリに合わせてSwift 5言語モード、依存CoreはSwift 6のまま。
+
+| 検証 | 結果・ログ |
+|---|---|
+| identity追加後のCore回帰 | 161件中155件成功・6件skip、18 suite、10.144秒。`mixed-profile-core-final.log` |
+| 最終Core＋実GPU＋専用Mach XPC | **162件中161件成功・1件skip、19 suite、25.815秒**。`mixed-core-installed-final.log`。既存manual、v1/v2 golden・Python/export parity、実Zenzai5件、導入済み専用helperへの新規Mach XPC試験を含む |
+| 実Mach XPC単独の初回 | **1件成功、3.050秒**。`mixed-installed-xpc-first.log`。capability → `asitahameetinggaarimasu` → `明日はmeetingがあります` 完全一致 → commit重複除外 → ackを検証。最終版はcloseSession応答も待って接続を閉じる |
+| クライアントboundary | **8件成功、失敗なし**。`mixed-client-second.log` と再現用スクリプトの `mixed-client-final.log`。交渉前のキー順序、manual既定、未対応serverでのraw復元、Unicode削除、OS確定・旧focus、Command通過。模擬IMK欄を使い、実IMK打鍵とは区別 |
+| インストーラー障害注入 | **9件成功**。`mixed-installer-tests-final.log`。一時homeと模擬OS呼出しで通常app・辞書の保全、コピー失敗、起動／登録失敗時の旧版復旧、別identity・symlink拒否、launchdの一時EIO限定再試行を確認。実削除・実障害を全網羅したという意味ではない |
+| app＋helperビルド | Xcode Debug arm64 build成功。`mixed-profile-build-third.log` / `mixed-profile-build-final.log`。3モード、専用資源、ad-hoc署名、codesign deep/strict確認 |
+| 導入前検査 | ホスト実行でstrict署名・helper identity一致。`mixed-install-host-dry-run.log` |
+| 実際の専用導入・更新 | `mixed-install.log` / `mixed-install-retry.log`。ユーザーの `Library/Input Methods/azooKeyMixed.app` と専用LaunchAgentを導入。アプリと専用helperのプロセス起動を確認。通常IMEのインストール・削除・登録・jobは変更していない |
+| 入力ソース有効化・実打鍵 | **未完了**。登録APIは成功するが、親sourceはenabled=false、3モードだけenabled=true。選択APIはOSStatus -50。システム設定の追加画面にもMixedは出ず、実IMEとしての文字入力は未実行 |
+
+Coreのskip1件はoffline dataset builder専用試験。ユーザー設定を書き換える既存 `testOptionPunctuationMappings` は従来どおり除外した。GPU試験で一時学習fixtureの不存在ログが出るが、対応assertionは成功している。既存のnative方式非推奨・weak capture・macOS最低version差などの警告は残る。SwiftLint・Linux・Intel・正式署名／公証は未実行。既存テストの期待値を弱めていない。
+
+### 途中の失敗と制約
+
+1. 初期Core/buildでPropertyListSerializationのoptions指定漏れ、次にこのSDKのReadOptionsへ配列を渡した型不一致で失敗。API定義に合わせて `options: 0` に修正。`mixed-profile-core-first.log` / `mixed-profile-build-first.log` / `mixed-profile-build-second.log`。
+2. クライアントharnessの初回はSwift 6モードになり、既存XPC callbackの非Sendable captureでコンパイル失敗。アプリprojectの `SWIFT_VERSION=5.0` と一致させて再実行し8件成功。productionの型検査設定やassertionは変更していない。`mixed-client-first.log` / `mixed-client-second.log`。
+3. sandbox内のstrict codesign確認はApple互換dylibのtrust検証でCSSMERR_TP_NOT_TRUSTEDとなった。同じstrict条件をホスト実行して成功。検証を緩めて回避していない。`mixed-install-dry-run.log` / `mixed-install-host-dry-run.log`。
+4. 実更新の初回はlaunchctl bootstrapがEIO=5で失敗し、旧Mixed app/jobへ復旧した。停止直後のendpoint解放との競合を疑い、専用jobが存在しない場合だけ0.2秒間隔・最大2秒再試行するよう修正。障害注入と実更新はその後成功した。正確なOS内部原因は未確定。`mixed-install-final.log` / `mixed-install-retry.log`。
+5. 登録直後のAPI一覧に古い重複エントリーが一時的に見えた。別プロセスでの最終確認では親＋3モードに収束した。しかし親が無効のままなので、APIが成功したことだけで利用可能とは判定しないよう制御CLIと案内を修正した。SDKのTextInputSources.hでは「mode選択には親IMEがenabledであること」を要求している。親から順に有効化するAPIも成功を返すが、このログイン中には反映されなかった。
+6. バックグラウンドアプリを画面ツールで取得すると約25分でtimeout、システム設定の取得にも約8分を要した。後続の既存ウインドウ操作は成功。Mixedプロセスは別途確認できたため、画面ツールのtimeoutだけを起動失敗とは判定しない。UIの実打鍵成功とも扱わない。
+
+### 現在の状態と次の作業
+
+**試験版のファイル配置・専用サーバー・実Mach XPC変換まで確認済み。macOSでの入力ソース有効化と実IMK打鍵は未確認のため、T5とT8を完了扱いしない。** 元の入力ソース `com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese` は前後で一致し、通常の登録内容・ユーザー設定を変更していない。確認用TextEdit新規書類は空のまま閉じ、既存文書を変更していない。OSログアウト・再起動・通常IMEの停止は行っていない。
+
+次は利用者が書類を保存して再ログインし、システム設定 → キーボード → テキスト入力「編集」→「＋」からMixedが追加できるか確認する。再ログインで解消するかは未検証なので保証しない。続いて自動／日本語／英数、提示例の逐次打鍵、Tab/Enter、Escape、末尾削除、フォーカス移動・Command操作をTextEditとChromium系で確認する。secure field・候補click・選択置換・server切断／再起動・長時間入力も残る。
+
+T3品質gate・追加650件の人手確認、T6中央編集、T7精度／遅延／RSS／ログ監査、T8正式配布の署名・権利表示は引き続き未完了。導入・更新・削除と未対応点は `Tools/AUTO_MIXED_IME.md`。今回の差分は未コミット。
+
+最終静的確認：`git diff --check` 成功、モデルchecksum不変、source resourcesの実験マーカー・一時リンクなし、lock/依存manifest不変。最終導入dry-runもstrict署名・identity検査に成功した（`mixed-final-dry-run.log`）。登録状態は `mixed-registration-final.json`、選択中IDの前後比較は一致。クライアント8件は0.006秒、導入試験9件は0.037秒で再実行成功した。

@@ -54,7 +54,7 @@ def prepare(app, model, resources):
     marker.write_text(json.dumps({"enabled": True, "modelSHA256": model_hash}, indent=2) + "\n")
     print("Experimental build resources prepared. No installation, registration, signing, or app launch performed.")
     print("Model SHA-256:", model_hash)
-    print("This does not certify model quality. Isolated identifiers and IMK application testing remain required.")
+    print("Resource preparation does not certify model quality, app isolation, or IMK behavior.")
 
 
 if __name__ == "__main__":

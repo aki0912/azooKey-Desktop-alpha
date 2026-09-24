@@ -4,7 +4,7 @@ import Foundation
 import KanaKanjiConverterModuleWithDefaultDictionary
 
 private enum ConverterServerXPC {
-    static let machServiceName = "dev.ensan.inputmethod.azooKeyMac.ConverterServer"
+    static let machServiceName = IMEIdentity.current.machServiceName
 }
 
 @objc private protocol ConverterServerXPCProtocol {
@@ -363,6 +363,19 @@ private final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
         connection.resume()
         return true
     }
+}
+
+// Read-only build verification; do not create a converter, user store, or Mach listener.
+if Array(CommandLine.arguments.dropFirst()) == ["--identity"] {
+    let identity = IMEIdentity.current
+    let metadata = ["bundleIdentifier": identity.bundleIdentifier, "machServiceName": identity.machServiceName,
+                    "preferencesIdentifier": identity.preferencesIdentifier, "keychainAccount": identity.keychainAccount,
+                    "dataScope": identity == .mixed ? "isolated-local" : "standard-app-group"]
+    if let data = try? JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys]) {
+        print(String(decoding: data, as: UTF8.self))
+        exit(EXIT_SUCCESS)
+    }
+    exit(EXIT_FAILURE)
 }
 
 // Dependency debug output can contain composition text. Silence experimental

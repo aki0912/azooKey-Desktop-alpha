@@ -71,6 +71,8 @@ evaluate --model ... --test ... --traces ...
 
 **2026-09-24時点：接続実装・自動試験・署名なしアプリ全体ビルドまで実施。実機確認待ち。** 専用dispatch、既存commandによるcapability確認、optional wire、commitID/ack、focus拘束、原文回復、候補区間表示とTab/Enter、bundleだけのopt-inを追加した。`ThinClientInputPipelineTests` は通常IMEを起動しない独立harnessで実行した。実際のIMK/他アプリへの入力・OS commit/stop順序は未実行なので、日常利用可能なT5完了とは扱わない。確定学習はOFFで、ack後のcandidate学習は未実装（03章§7に理由と影響）。手順は `Tools/AUTO_MIXED_IME.md`、失敗を含む検証記録は `implementation_status.md` 末尾を参照。
 
+**同日の追加：** 通常版と分離したazooKey Mixedの3入力モード、専用保存先・Mach service・導入ツールを実装し、ローカル署名・インストール・実Mach XPC変換まで確認した。交渉中のキー保持も独立harnessで検証。ただしmacOSで親入力ソースが無効のまま、設定の追加候補にも出ないため実IMK打鍵は未実行。再ログイン後の有効化確認が必要で、T5完了とはしない。詳細はimplementation_status末尾。
+
 ### T6：保留・編集・ユーザー修正
 
 依存：T3/T5。
@@ -117,3 +119,5 @@ xcodebuild -list -project azooKeyMac.xcodeproj
 `implementation_status.md`にstageごとに「変更ファイル」「実行したテストと結果」「未実行試験」「未解決の設計差分」「次stageの前提」を書く。コンパイルだけ通過、モックだけ通過、実Zenzai確認済み、実機GUI確認済みを区別する。
 
 自分で作ったmock結果や計画目標を性能表の実測欄へ転記しない。評価で仕様変更が必要ならdecision logを更新し、既存テストの期待値を理由なく弱めない。
+
+**2026-09-24のT8先行実装：** `azooKey Mixed` のbundle/Mach service/LaunchAgent/設定・辞書・APIキーを通常版から分離し、専用導入・削除ツールと9件の模擬障害試験を追加した。有効な署名証明書が見つからず、このMac向けad-hoc署名・Sandbox/AppGroupなしの専用保存先を採用。通常版の構成は維持した。実ファイル導入・helper通信は成功したが、親入力ソースの有効化は未完了。正式署名・公証・資源の再配布権利表示と実利用確認が残り、T8全体は未完了。

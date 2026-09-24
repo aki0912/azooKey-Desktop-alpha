@@ -215,3 +215,11 @@ Commandを通す方針は維持するが、Cmd+A/C/Vやアプリ選択変更と�
 
 ---
 出典番号は [08. 一次資料・設計判断](08_SOURCES_AND_DECISIONS.md) を参照。
+
+## 11. ローカル併用profileの実装差分（2026-09-24）
+
+試験版は `IMEIdentity.mixed` としてbundle・接続・保存先を分離し、InputModeに日本語・英数・自動を定義した。日本語／英数は既存manual、自動は実験マーカーとcapabilityを要求する。通常版にはマーカーも自動modeも追加しない。手動composition中に自動を選んだ場合は確定まで有効化を待つ。
+
+capabilityを待つ間の打鍵をclientが保持し、確認後に順番に送る。未対応／失敗なら原文を元の欄へ一度だけ回復する。旧focus失効・Unicode削除・手動既定は独立harnessで検証した。初回GGUF/Metal初期化のためauto timeoutを5秒とし、manualの既存1秒設定は維持する。未応答journalの長時間上限や障害時の無損失保証を完了したという意味ではない。
+
+このMac用profileはad-hoc署名・Sandbox/AppGroupなしのローカル専用保存先を用いる。正式配布向け要件を満たしたとはしない。実Mach XPC変換は確認済みだが、macOSの親入力ソースがenabled=falseのため実IMK打鍵は未実行。再ログイン後に確認する。導入仕様・制約は `Tools/AUTO_MIXED_IME.md` と `implementation_status.md` 末尾を参照。

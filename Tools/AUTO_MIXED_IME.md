@@ -1,49 +1,82 @@
-# 自動日英入力：IME接続の開発手順
+# azooKey Mixed のローカル試用
 
-2026-09-24時点で、Coreの混在入力からConverterServer・IMKクライアントまでの接続を追加した。通常ビルドはOFF。T3の品質基準、T5の実機確認、T6の中央編集、T7/T8の評価・隔離配布は未完了で、日常利用できる完成版ではない。
+通常版と併用する試験版を `azooKey Mixed` として用意した。**自動・日本語・英数** の3モードを実装した。2026-09-24のこの環境ではインストール・専用サーバー起動まで成功したが、macOSの親入力ソースが無効のままで、実際のモード選択・打鍵は未確認。まず再ログイン後の有効化確認が必要。現在の学習済みモデルを使うが、品質基準は未達で `release_ready=false`。中央編集・長時間利用・広範なアプリ互換性の確認は残っている。
 
-## 有効化の契約
+## 導入・更新
 
-開発ビルドの `Contents/Resources/auto-mixed-experiment.json` が存在し、`enabled` がtrueの場合だけ、IMEは既存の `.composition(.snapshot)` でcapabilityを確認する。サーバーは `auto-mixed-model.json` のSHA-256・schema・非fixture条件とGGUFの存在を確認する。未対応サーバー、壊れたモデル、非標準入力表ではmanualへ戻る。
-
-マーカーの形式は次のとおり。これは設定案ではなく、`AutoMixedExperiment.Configuration` の実装済み契約である。
-
-```json
-{"enabled": true, "modelSHA256": "学習済みruntime exportのSHA-256（64桁）"}
-```
-
-マーカーをsource resourcesへ追加しない。ユーザー設定へ有効化状態を書き込まない。開発ビルドのメニューに「自動日英入力（実験）」を表示する。capability返答前にmanual入力が始まった場合、そのフォーカスでは途中からautoへ切り替えない。
-
-## ビルド出力への資源配置
-
-`Tools/prepare_auto_mixed_ime_build.py` は既にビルドしたappに実験用モデルと、取得済みGGUF・ngram資源を配置する。出力はこのcheckoutの `build/` 内だけに制限する。receiptの5資源のsize/SHA-256をすべて照合し、fixtureを拒否してからコピーする。学習、ダウンロード、起動、インストール、登録、署名は行わない。
+このMacで検証した構成はmacOS 27、arm64、Xcode 27、Swift 6.4。取得済みのGGUF・4 marisa資源とreceipt、学習済みruntime exportを使用する。スクリプトはコーパス取得や再学習を行わない。
 
 ```sh
-python3 Tools/prepare_auto_mixed_ime_build.py \
-  --app build/auto-mixed/xcode-derived/Build/Products/Debug/azooKeyMac.app \
-  --model build/auto-mixed/independent-thresholds-refined-20260924/export/model.json \
-  --resources build/auto-mixed/runtime-resources
+python3 Tools/build_mixed_ime.py
+python3 Tools/install_mixed_ime.py install --dry-run
+python3 Tools/install_mixed_ime.py install
+python3 Tools/install_mixed_ime.py status
 ```
 
-`kind=production` はruntime形式の識別であり、品質合格を意味しない。現在のモデルは引き続き `release_ready=false`。資源配置はappの内容を変更するため、配布用署名の代用にはならない。生成物は通常版と同じbundle/Mach service/AppGroup識別子を持つ段階なので、起動や入力ソース登録へ進めない。T8で名前・識別子・辞書領域を分ける必要がある。
+ビルド先は `build/auto-mixed/mixed-ime/azooKeyMixed.app`。ユーザーの `Library/Input Methods/azooKeyMixed.app` と専用LaunchAgentへ導入し、このアプリの入力ソースだけを登録・有効化する。インストーラーは現在選択中の入力ソースを切り替えない。更新前には別の入力ソースを選ぶ。通常版を置き換える既存 `install.sh` は使わない。
 
-今回確認したビルドはXcode 27、arm64 Debug、署名なし。DerivedData・SourcePackagesは `build/auto-mixed/` 内。`Tools/embed_converter_server.sh` は開発時だけ `AZOOKEY_PREBUILT_CONVERTER_SERVER_DIR` で検証済みSwiftPM出力を指定できる。指定がない通常ビルドの処理は従来どおり。未初期化submoduleのモデル資源は取得済みファイルへの一時リンクでビルドし、そのリンクは検証後に削除した。実行ログと制約は `implementation_status.md` に記録した。
+作業中の書類を保存して一度ログアウト・ログインし直し、システム設定 → キーボード → テキスト入力「編集」→「＋」で日本語の `azooKey Mixed` を追加する。その後、画面上部の入力メニューから `azooKey Mixed（自動）` を選ぶ。通常版はそのまま残す。再ログイン後も一覧に出ない場合の原因は未確認で、有効化できたとは扱わない。設定画面の手順は[Appleの入力ソース設定ガイド](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/mac)を参照。
 
-## 現在のキー契約
+- **自動**：日本語を優先し、モデルと英単語辞書の条件を満たす英語を保持する。例：`asitahameetinggaarimasu` → `明日はmeetingがあります`。
+- **日本語**：既存の手動日本語入力。Spaceの候補操作などは従来の経路を使う。
+- **英数**：既存の英数入力。
+
+英数／かなキーは英数／日本語へ切り替える。自動へ戻るときは入力メニューで選び直す。切替時に手動入力が残っている場合、自動判定はその確定後から開始する。
+
+## 通常版との分離
+
+| 対象 | azooKey Mixed |
+|---|---|
+| アプリ／実行ファイル | `azooKeyMixed.app` / `azooKeyMixed` |
+| bundle ID | `dev.azookey.inputmethod.azooKeyMixed` |
+| Mach service／LaunchAgent | `dev.azookey.inputmethod.azooKeyMixed.ConverterServer` |
+| 入力モードID末尾 | `.Automatic` / `.Japanese` / `.Roman` |
+| 設定domain | `dev.azookey.inputmethod.azooKeyMixed.preferences` |
+| API key account | `dev.azookey.inputmethod.azooKeyMixed.preference.OpenAiApiKey` |
+| 辞書・学習データ | ユーザーの `Library/Application Support/azooKeyMixed` 以下 |
+| カスタム入力表ディレクトリ名 | `azooKeyMixed` |
+
+通常版の設定・辞書・APIキーを自動移行しない。Mixedの設定がないときは既定値を使い、通常版のUserDefaultsへfallbackしない。埋め込みhelperの `--identity` でも同じ識別子を検証する。通常のXcodeビルドの識別子・署名設定・保存先は従来どおり。
+
+ローカル署名用の有効な証明書が見つからなかったため、この試用ビルドは**ad-hoc署名、App Sandbox/App Groupなし、専用のローカル保存先**を使う。一般配布用のDeveloper ID署名・公証は未実施。通常版のsandboxやOSのセキュリティ設定を解除する処理はない。再配布に必要な同梱資源の権利表示も未完了。
+
+導入前にbundle ID・3モード・接続名・helperの保存先識別子・厳密な署名検証を行う。別アプリやsymlinkは上書きしない。コピー・起動・登録が失敗した場合は旧MixedアプリとLaunchAgentへ復旧する。停止直後のlaunchdのEIOは、専用jobが存在しない場合に限り最大2秒再試行する。OS登録途中の失敗を含む完全なトランザクション保証ではない。
+
+## 自動モードの操作
 
 - 文字とSpaceは原文へ追加する。Spaceは空白を入力する。
-- Tab/Shift-Tabは候補の移動。候補対象の区間を強調表示する。Enterで候補採用、候補選択外のEnterで全体確定する。
-- Escapeは原文表示へ戻す。Backspaceは末尾の書記素単位で削除する。
-- 英字だけのcomposition中もTabはフォーカス移動へ使えない。メニューの説明にも記載した。
-- OSの即時確定・非アクティブ化では、元の入力欄へ表示済み文字列を同期確定する。未応答の打鍵がある場合は原文を復元して確定するため、漢字表示を維持できない場合がある。
-- Commandはアプリへ通す。英数/かなによる切替や非標準入力表はmanualへ退避する。auto中は既存のライブ変換設定・AI変換メニューを無効にする。
+- Tab/Shift-Tabは候補移動。対象区間を強調する。Enterで候補採用、候補選択外のEnterで全体確定。
+- Escapeで原文表示へ戻す。Backspaceは末尾の書記素単位で削除。
+- 英字だけの入力中もTabは候補操作に使う。Commandキー操作はアプリへ通す。
+- フォーカス移動やOSの即時確定では、元の入力欄へ表示済み文字列を確定する。未応答打鍵があれば原文を保全するため、漢字表示を失うことがある。
+- 非標準入力表・未対応サーバー・壊れたモデルでは手動日本語へ戻る。入力メニュー内の案内で準備中／利用不可を表示する。自動モード中は既存ライブ変換設定とAI変換メニューを使用しない。
 
-左右キー・マウスによる中央編集、任意区間の選択・強制指定は未完成。未対応キーはcomposition中にconsumeされることがある。候補やフォーカスの実IMKイベント順序、Cmd+A/C/V、アプリ側の選択変更は未検証。
+左右キー・マウスによる中央編集、任意区間の選択・強制指定は未完成。未対応キーが入力中に消費される場合がある。検証済みのアプリ・操作と未実行項目は `implementation_status.md` 末尾を参照。
 
-## 学習・障害回復・プライバシー
+## 有効化・障害回復・プライバシー
 
-実験版IMEはpreviewも確定も変換学習OFF。commitIDのackは保留中の確定文字列を除去するために使い、候補tokenを学習させない。未ack確定は8件まで保持し、超過時は原文を保持して追加確定を止める。ackに伴う候補学習は別の実装課題である。
+通常sourceにマーカーは置かず、自動入力はOFF。専用ビルドの `Contents/Resources/auto-mixed-experiment.json` がenabled=trueの場合だけ、選択した自動モードで既存 `.composition(.snapshot)` によるcapability確認を行う。モデルSHA-256・schema・非fixture・GGUFの存在を照合する。`kind=production` はruntime形式の識別であり、品質合格ではない。
 
-raw・短い左右文脈・回復journalはメモリ内に限る。文脈は既存のIMK取得経路で最大30 UTF-16単位を要求し、transport/factoryでも30文字以下に制限する。新しいcompositionを開始する打鍵でのみ判定器へ渡す。取れない場合は文脈なしで動作する。依存ライブラリのdebug出力に入力が含まれるため、実験マーカーのあるConverterServerは受付開始前にstdout/stderrを破棄する。実運用の全ログ経路の監査・動的検証はT7に残る。
+初回のcapability確認中も打鍵を保持し、対応サーバーと確認できてから順番に送る。失敗時は元の入力欄へ原文を一度だけ回復する。GGUF/Metalの初期化を考慮し、自動要求の応答待ちは5秒、手動入力の既存1秒設定は維持する。旧フォーカス・別server epochの返答は挿入しない。commitIDで二重確定を除外し、auto要求を無制限再送しない。プロセスクラッシュをまたぐ無損失は保証しない。
 
-旧フォーカス・別server epochの応答は挿入しない。確定effectはsnapshotと別に重複を除く。auto要求は旧キー要求の無制限再送を使わず、失敗時に元の欄で原文回復してmanualへ戻る。プロセスクラッシュをまたぐ無損失・exactly-onceは保証しない。未応答Enterを含む障害回復は、複数の未確定入力をまとめた原文になる場合がある。
+自動入力のpreviewも確定も変換学習OFF。未ack確定文字列は8件まで保持し、ackはその除去に使う。raw・短い文脈・回復journalはメモリ内だけ。既存IMK経路で最大30 UTF-16単位を要求し、transportでも長さを制限する。取得できなければ文脈なしで動く。Mixedアプリのdebug入力記録を止め、実験helperのstdout/stderrを受付開始前に破棄し、専用LaunchAgentも両出力を破棄する。全ログ経路の動的監査はT7に残る。
+
+## 検証・削除
+
+```sh
+python3 Tools/tests/test_mixed_ime_install.py
+python3 Tools/test_mixed_ime_client.py
+# 実際に専用サーバーを導入した場合だけ、CoreのMixedIMEInstalledTestsを
+# AUTO_MIXED_INSTALLED_TEST=1 で実行する。通常版へ接続しない。
+```
+
+インストーラーテストは一時領域と模擬OS呼出しを使う。クライアント試験は通常IMEのtest hostを起動せず、本物のクライアント実装と模擬IMK欄・transportで検証する。いずれも実機入力の代用とはしない。
+
+削除時は先に通常版など別の入力ソースへ切り替える。
+
+```sh
+python3 Tools/install_mixed_ime.py uninstall --dry-run
+python3 Tools/install_mixed_ime.py uninstall
+```
+
+Mixedの入力ソースだけを無効化し、専用アプリとLaunchAgentを削除する。設定・辞書・APIキーは残す。通常版へは触れない。開発時の `MixedIMEControl current` は現在のIDを表示し、`restore <ID>` は既に有効な入力ソースを選び直すだけで登録・有効化を変更しない。

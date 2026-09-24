@@ -2,9 +2,16 @@ import AppKit
 import InputMethodKit
 import Core
 
+@MainActor protocol AutoMixedCommandSending {
+    func send(_ command: @escaping (String) -> ConverterSessionCommand, timeout: TimeInterval?,
+              completion: @escaping (ConverterServerResponse?) -> Void)
+}
+extension ConverterServerClient: AutoMixedCommandSending {}
+
 /// IMK boundary for the opt-in bundle. The existing controller remains the manual path.
 @MainActor final class AutoMixedIMEClient {
-    private let server: ConverterServerClient
+    private let server: any AutoMixedCommandSending
+    private let experimentEnabled: () -> Bool
     private let render: (ConverterServerResponse) -> Void
     private var ledger = AutoMixedClientLedger()
     private var operationID: UInt64 = 0
@@ -15,12 +22,17 @@ import Core
     private var pending = 0
     private var lastMixed: AutoMixedResponse?
     private var lastDisplayed = ""
-    private var manualInputStarted = false
-    var requestedPolicy: CompositionPolicy = .automaticMixed
-    var isActive: Bool { active }
+    private var negotiating = false
+    private var bufferedKeys: [(KeyEventCore, ConverterTextContext)] = []
+    var requestedPolicy: CompositionPolicy = .manual
+    var isActive: Bool { active || negotiating }
 
-    init(server: ConverterServerClient, render: @escaping (ConverterServerResponse) -> Void) {
+    init(server: any AutoMixedCommandSending, experimentEnabled: @escaping () -> Bool = {
+        guard let resources = Bundle.main.resourceURL else { return false }
+        return AutoMixedExperiment.configuration(in: resources) != nil
+    }, render: @escaping (ConverterServerResponse) -> Void) {
         self.server = server
+        self.experimentEnabled = experimentEnabled
         self.render = render
     }
 
@@ -30,33 +42,54 @@ import Core
         let generation = activation
         origin = client as AnyObject
         active = false
+        negotiating = false
+        bufferedKeys = []
         pending = 0
         startsFocus = true
         lastMixed = nil
         lastDisplayed = ""
-        manualInputStarted = false
-        guard requestedPolicy == .automaticMixed, let resources = Bundle.main.resourceURL,
-              AutoMixedExperiment.configuration(in: resources) != nil else { return }
+        guard requestedPolicy == .automaticMixed, experimentEnabled() else { return }
+        negotiating = true
         // This command is understood by old servers; no new enum case before negotiation.
-        server.send({ _ in .composition(.snapshot) }) { [weak self] response in
-            guard let self, self.activation == generation, !self.manualInputStarted, canEnable() else { return }
+        server.send({ _ in .composition(.snapshot) }, timeout: 5) { [weak self] response in
+            guard let self, self.activation == generation else { return }
+            let raw = self.ledger.recoveryRaw()
+            let keys = self.bufferedKeys
+            self.bufferedKeys = []
+            self.negotiating = false
+            guard canEnable() else {
+                self.recoverNegotiation(raw: raw)
+                return
+            }
             self.ledger.activate(capability: response?.autoMixedCapability)
             self.active = self.ledger.capability != nil
+            if self.active {
+                for (key, context) in keys { self.send(.key(key), context: context) }
+            } else { self.recoverNegotiation(raw: raw) }
         }
+    }
+
+    private func recoverNegotiation(raw: String) {
+        let client = origin as? IMKTextInput
+        deactivate()
+        if !raw.isEmpty { client?.insertText(raw, replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        render(ConverterServerResponse(snapshot: .empty))
     }
 
     func handle(_ event: KeyEventCore, client: IMKTextInput, inputStyle: ConverterInputStyle,
                 context: () -> ConverterTextContext) -> Bool? {
-        guard active else {
-            if AutoMixedKeyRouter.input(event) != nil { manualInputStarted = true }
-            return nil
-        }
+        guard isActive else { return nil }
         guard origin === (client as AnyObject) else { deactivate(); return nil }
         if event.keyCode == 102 || event.keyCode == 104 || inputStyle != .defaultRomanToKana {
             leaveForManual()
             return nil
         }
-        guard AutoMixedKeyRouter.owns(event, composing: !(lastMixed?.raw.isEmpty ?? true), pending: pending > 0) else { return false }
+        guard AutoMixedKeyRouter.owns(event, composing: !(lastMixed?.raw.isEmpty ?? true), pending: pending > 0 || !bufferedKeys.isEmpty) else { return false }
+        if negotiating {
+            bufferedKeys.append((event, context()))
+            ledger.recordKey(event, operationID: operationID &+ UInt64(bufferedKeys.count))
+            return true
+        }
         send(.key(event), context: context())
         return true
     }
@@ -64,7 +97,7 @@ import Core
     /// IMK requests immediate completion. Do not wait for XPC across a focus change:
     /// commit the displayed snapshot, or the raw recovery journal if keys are in flight.
     @discardableResult func finishImmediately(client: IMKTextInput?, keepMode: Bool) -> Bool {
-        guard active, let client, origin === (client as AnyObject) else { return false }
+        guard isActive, let client, origin === (client as AnyObject) else { return false }
         let capability = ledger.capability
         let text = ledger.immediateCommitText(displayed: lastDisplayed)
         send(.deactivate)
@@ -72,18 +105,21 @@ import Core
         ledger.activate(capability: keepMode ? capability : nil)
         startsFocus = true
         pending = 0
+        negotiating = false
+        bufferedKeys = []
         lastMixed = nil
         lastDisplayed = ""
         active = keepMode && ledger.capability != nil
         if !text.isEmpty { client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)) }
         render(ConverterServerResponse(snapshot: .empty))
+        if keepMode && capability == nil { activate(client: client, canEnable: { true }) }
         return true
     }
     func leaveForManual() {
         _ = finishImmediately(client: origin as? IMKTextInput, keepMode: false)
     }
     @discardableResult func stop() -> Bool {
-        guard active else { return false }
+        guard isActive else { return false }
         send(.stop)
         return true
     }
@@ -97,6 +133,8 @@ import Core
     func deactivate() {
         if ledger.capability != nil { send(.deactivate) }
         active = false
+        negotiating = false
+        bufferedKeys = []
         activation = UUID()
         origin = nil
         ledger.deactivate()
@@ -113,7 +151,8 @@ import Core
         if case .key(let key) = action { ledger.recordKey(key, operationID: operationID) }
         pending += 1
         let generation = activation
-        server.send({ _ in .autoMixed(request) }) { [weak self] response in
+        // A cold GGUF/Metal initialization can exceed the legacy one-second timeout.
+        server.send({ _ in .autoMixed(request) }, timeout: 5) { [weak self] response in
             guard let self, self.activation == generation, let client = self.origin as? IMKTextInput else { return }
             self.pending = max(0, self.pending - 1)
             guard let response, let mixed = response.autoMixed,

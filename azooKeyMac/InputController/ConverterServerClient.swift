@@ -2,7 +2,7 @@ import Core
 import Foundation
 
 private enum ConverterServerXPC {
-    static let machServiceName = "dev.ensan.inputmethod.azooKeyMac.ConverterServer"
+    static let machServiceName = IMEIdentity.current.machServiceName
 }
 
 @objc private protocol ConverterServerXPCProtocol {
@@ -114,9 +114,10 @@ final class ConverterServerClient {
 
     func send(
         _ commandBuilder: @escaping (String) -> ConverterSessionCommand,
+        timeout: TimeInterval? = nil,
         completion: @escaping (ConverterServerResponse?) -> Void
     ) {
-        enqueue(commandBuilder, retriesOnFailure: false, completion: completion)
+        enqueue(commandBuilder, retriesOnFailure: false, timeout: timeout, completion: completion)
     }
 
     /// キーイベントはタイムアウトで捨てず、1件ずつ順番に Server へ送る。
@@ -142,11 +143,12 @@ final class ConverterServerClient {
     private func enqueue(
         _ commandBuilder: @escaping (String) -> ConverterSessionCommand,
         retriesOnFailure: Bool,
+        timeout: TimeInterval? = nil,
         completion: @escaping (ConverterServerResponse?) -> Void
     ) {
         var proposedSessionID: String?
         commandQueue.enqueue(
-            timeout: Self.commandTimeout,
+            timeout: timeout ?? Self.commandTimeout,
             timeoutOutcome: retriesOnFailure ? .retry : .finish(nil),
             onTimeout: { [weak self] in
                 self?.handleCommandTimeout()
