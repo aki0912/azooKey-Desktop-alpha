@@ -69,6 +69,8 @@ evaluate --model ... --test ... --traces ...
 
 完了：ThinClientInputPipelineTests、二重effect／古い応答テスト。auto停止時にlegacy managerが空でも混在原文を消さない。
 
+**2026-09-24時点：接続実装・自動試験・署名なしアプリ全体ビルドまで実施。実機確認待ち。** 専用dispatch、既存commandによるcapability確認、optional wire、commitID/ack、focus拘束、原文回復、候補区間表示とTab/Enter、bundleだけのopt-inを追加した。`ThinClientInputPipelineTests` は通常IMEを起動しない独立harnessで実行した。実際のIMK/他アプリへの入力・OS commit/stop順序は未実行なので、日常利用可能なT5完了とは扱わない。確定学習はOFFで、ack後のcandidate学習は未実装（03章§7に理由と影響）。手順は `Tools/AUTO_MIXED_IME.md`、失敗を含む検証記録は `implementation_status.md` 末尾を参照。
+
 ### T6：保留・編集・ユーザー修正
 
 依存：T3/T5。

@@ -20,6 +20,7 @@ extension azooKeyMacInputController {
     }
 
     @objc func toggleLiveConversion(_ sender: Any) {
+        guard !MainActor.assumeIsolated({ self.isAutomaticMixedInputActive }) else { return }
         self.appendDebugMessage("\(#line): toggleLiveConversion")
         let config = Config.LiveConversion()
         config.value = !self.liveConversionEnabled
@@ -37,6 +38,7 @@ extension azooKeyMacInputController {
     }
 
     @MainActor @objc func performTransformSelectedText(_ sender: Any) {
+        guard !self.isAutomaticMixedInputActive else { return }
         let aiBackendEnabled = Config.AIBackendPreference().value != .off
         self.updateTransformSelectedTextMenuItemTitle(aiBackendEnabled: aiBackendEnabled)
         guard aiBackendEnabled else {
@@ -57,6 +59,8 @@ extension azooKeyMacInputController {
     }
 
     @MainActor @objc func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if self.isAutomaticMixedInputActive,
+           menuItem == self.liveConversionToggleMenuItem || menuItem == self.transformSelectedTextMenuItem { return false }
         guard menuItem == self.transformSelectedTextMenuItem else {
             return true
         }

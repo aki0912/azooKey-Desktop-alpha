@@ -1,8 +1,8 @@
 # Auto Mixed Input 実装状況
 
-2026-09-24時点。**旧50原文へCodex作成650件を追加し、計700原文でv1/v2のLR学習・校正・runtime exportを完了した。品質基準は未達で、T3全体は未完了。** 増強後は3,907行。追加650件の人手確認も未実施。自動混在入力はOFFのまま。続く閾値の独立探索でdevの保留率は改善したが、品質目標は未達。最新記録は末尾の「文脈別の閾値を独立探索」を参照。
+2026-09-24時点。**T0〜T2と実ZenzaiのT4は検証済み。混在入力の試用アプリが動作し、今回T5のConverterServer／IMK接続を実装してアプリ全体のビルドまで通した。実機IMEとしての入力確認と隔離配布は未完了。通常ビルドの自動混在入力はOFF。** 最新記録は末尾の「T5：IME接続を実装、実機確認待ち」を参照。
 
-fixtureと今回の校正済み候補でPython／Swift数値一致を確認した。候補モデルはrelease_ready=false。実Zenzai接続・混在入力のIMK接続・十分な独立品質評価は未完成。実入力での曖昧語の判別性能やv2の優位性は主張しない。以下の各stageは当時の資料パス・実行結果を含む履歴である。
+計700原文（増強後3,907行）でv1/v2のLR学習・校正・exportは実施済みだが、品質基準未達のためT3全体は未完了、候補モデルはrelease_ready=false。追加650件の人手確認も未実施。fixtureと候補モデルのPython／Swift数値一致を確認したことと、実入力での判別性能・v2の優位性を区別する。T6全体・T7/T8は未完了。以下の各stageは当時の資料パス・実行結果を含む履歴である。
 
 ## T0：参照commitと現状の確認を完了
 
@@ -889,3 +889,69 @@ T3の精度改善と独立test、T6の編集／表示安定化、T7の入力追�
 全体試験のskipはoffline dataset bridgeと実Zenzai4件。そのうち3件だけ別途ホストGPUで成功し、既存の複数session共有GPU試験とoffline dataset bridgeは今回は未実行。設定を書き換える `testOptionPunctuationMappings` は従来どおり別途除外した。環境はmacOS 27.0 arm64／Swift 6.4／Xcode 27。native方式・user-level cache・macOS最低version差などの既存警告は残る。ホストGPU試験は一時領域・学習OFF。LaunchServicesの再検証はせず、既存の直接起動を継続した。
 
 今回の表示保持はモデルが示した境界と辞書の範囲に限る。複数の英単語を含む長い連結入力の一般的な分割、未知語・語形変化の網羅、meeting完成前のすべての打鍵遷移、広範な誤変換率・入力遅延・RSS、実機IME／他アプリ、Xcode全体build・Linux・SwiftLintは未実行。有限の例から一般的な抽出精度は主張しない。通常IMEは未接続で機能OFF、manual／XPC／IMK・インストール・削除・登録・LaunchAgent・ユーザー設定は未変更。ユーザー入力・文脈の記録を追加していない。T5へ進む前提を維持し、T3品質gate・T6全体・T7は未完了のまま。
+
+## T5：IME接続を実装、実機確認待ち（2026-09-24）
+
+利用者の「現在の完成状況を確認し、IMEとして使うための残作業を進める」という依頼に対応した。開始HEADは `b1b155e4b525ebb87448012ff210832fa854e3bb`、git statusはclean。既存のT0〜T2・T4・試用アプリ・meeting抽出を作り直さず、次のT5接続を実装した。仕様の現行位置は `docs/azookey_auto_mixed_codex/`。README、CODEX_START、03/06/07章と本記録を確認し、AGENTSは実ファイルがないため会話の指示を適用した。依存revision、モデル、辞書、学習データは変更していない。
+
+### 実装内容
+
+- `Core/Sources/Core/XPC/AutoMixedTransport.swift`：実定義としてCompositionPolicy、capability version 1、epoch/focus/operation/composition/revision、scalar/UTF-16 span、commitID/ack、クライアントledger、同期キーrouterを追加。旧 `ConverterServerResponse` の新フィールドはoptionalで、欠損JSONをdecodeできる。
+- `AutoMixedServerSession.swift`：専用逐次adapter。legacyの `withSession` の外側で混在engineとchildを操作する。Space・Tab/Shift-Tab・候補採用Enter・全体確定Enter・Escape・末尾削除・候補世代・上限256を接続。候補対象の区間は既存marked textのfocused属性で表示する。stopはlegacy managerが空でも原文を保持する。
+- `AutoMixedRuntime.swift` とConverterServer：bundleマーカーのopt-in、モデルSHA-256照合、fixture拒否、既存学習済みv2＋日本語優先adapter＋実GGUF bridge。通常ビルドにはマーカーを置かずOFF。旧サーバーへ新enumを送る前に既存 `.composition(.snapshot)` でcapabilityを確認する。既定manual経路は既存のまま。
+- `azooKeyMac/InputController/AutoMixedIMEClient.swift` と既存controller：XPC接続、元クライアントへの確定、候補UI、フォーカス世代、古い応答と二重commitの除外、切断時の原文回復、非標準入力表のmanual退避を追加。実験マーカーのあるappだけ切替メニューを表示する。有効中は既存ライブ変換設定／AI変換メニューを使わない。ユーザー設定への保存は追加しない。
+- 短い文脈は既存 `getLeftSideContext/getRightSideContext(maxCount: 30)` から取得する。取得要求はUTF-16範囲で、request/factoryでも30文字以下に限定する。nilなら文脈なし。ackやstopで次compositionの空文脈を固定せず、空入力後の次の打鍵で取り直す。文脈・raw・journalはメモリ内だけで、ログや学習データへ保存しない。
+- `Tools/prepare_auto_mixed_ime_build.py`：このcheckoutの `build/` 内にあるビルド済みappだけへ、取得済み資源と学習済みモデルを配置する。5資源のreceipt/size/SHA-256、モデルschema、非fixture条件を照合してから最後にマーカーを作る。自動取得・学習・起動・登録・インストールはしない。手順と未対応点は `Tools/AUTO_MIXED_IME.md`。
+
+モデルはschema 2、`anchored-context-v2`、`offline-retuned-302c6220b7f569e5`、SHA-256 `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` のまま。v1/v2の特徴量・係数・閾値・LR・Viterbi・goldenは変更していない。`kind=production` はruntime形式であり、品質gate合格を意味しない。今回も `release_ready=false` として扱う。
+
+### 仕様差分・理由・影響
+
+1. **確定学習はOFF**。preview/commitで学習させない。未ack確定文字列は最大8件保持し、超過時は原文を維持して追加確定を止める。ackは文字列の退去だけを行う。候補childは確定時に解放するため、仕様03章§7の「ack後にpending candidateを一度だけ学習」は未実装。重複挿入防止を先に検証するための分離であり、候補選択から学習するIMEとしては未完成。
+2. **OSの確定は同期処理**。SDKのIMKInputController宣言にある、`commitComposition` の復帰前に確定を終える契約を確認した。XPCの遅い返答を別の入力欄へ適用しないよう、元のクライアントへ最後の表示を同期確定して旧focusを失効する。未応答キーがある場合はack済みraw＋未応答打鍵から原文を確定する。影響としてフォーカス移動時に漢字表示を失う場合がある。通常Enterはserver commitID/ack方式。
+3. **auto要求の失敗時は原文回復してmanualへ戻す**。旧キー要求の継続再送をそのまま使うと別server epochへ不明な確定を再送し得るため、autoは再送しない。manual再送は変更しない。未応答Enterを含むjournalは入力を消さず保持するため、障害時に複数composition相当のrawが連結される場合がある。プロセスクラッシュをまたぐexactly-onceは保証しない。
+4. **実験プロセスのstdout/stderrを破棄**。依存Converterのdebug出力に入力が含まれるため、マーカーのあるConverterServerは受付前に両出力を破棄する設定にする。通常manualプロセスは変更しない。T7の全ログ経路・analytics・実機動的監査を済ませたという意味ではない。
+
+上記の差分を03章と06章にも記録した。既存テストの期待値は弱めていない。
+
+### 実行した検証
+
+環境はmacOS 27.0 arm64／Swift 6.4／Xcode 27（27A266a）／Python 3.11.9。Coreはnative方式、cache/scratchは `build/auto-mixed/`。Xcodeはscheme `azooKeyMac`、Debug、`platform=macOS,arch=arm64`、署名OFF、分離DerivedData/SourcePackages。通常IMEのプロセスは起動していない。
+
+| 検証 | 結果 |
+|---|---|
+| ConverterServer native build | 成功、5.51秒。`build/auto-mixed/t5-server-first.log`。最終Core test buildでも更新済みhelperを生成し、Xcodeへ埋め込み |
+| 初期transportテスト | 7件成功、0.003秒。続くモデル付き試験は9件中8件成功・実GGUF1件skip、0.521秒。`t5-core-second.log` / `t5-core-third.log` |
+| 最終Core全体 | **158件中152件成功、6件skip、17 suite、9.819秒**。新transport11件、既存manual、v1/v2 golden、新規生成Python parity、fixture exportと承認済みモデルexport parityを含む。`build/auto-mixed/t5-core-final.log` |
+| 実Zenzai、ホストGPU | **5件成功、skipなし、5 suite、3.548秒**。新wire sessionの `asitahameetinggaarimasu → 明日はmeetingがあります` 完全一致と確定、既存の日本語優先・かな末尾・未完末尾、複数session/複数childの混線・モデル再読込防止。backend=zenzaiReadyを検証。`build/auto-mixed/t5-zenzai.log` |
+| ThinClientInputPipelineTests | **4件成功、失敗なし、0.003秒**。遅延応答の順序とキー所有権、Command通過、autoのSpace/Tab、OS即時確定用raw復元とfocus失効。build-only SwiftPM harnessで元のテストファイルを直接使用。通常IMEのtest hostは起動しない。`build/auto-mixed/t5-thin-client-second.log` |
+| アプリ全体 | **Xcode Debug build成功**。新IMKクライアント、候補区間表示、メニュー、Core、embedded ConverterServerを含む。`build/auto-mixed/t5-xcode-build-fourth.log` / `t5-xcode-build-final.log`。署名・起動・実機入力の成功とは区別 |
+| 開発app資源配置 | prepare CLI成功。モデル・GGUF・4 marisa資源のchecksum、helper/別添bundleを確認。fixture拒否、build外出力拒否も確認。`build/auto-mixed/t5-prepare-ime.log`。appは起動しない |
+| 静的確認 | `git diff --check` 成功、モデルchecksum不変、source resourcesに実験マーカーなし、一時資源リンク除去、tracked lock/依存manifest不変 |
+
+新規テストは旧JSON互換、未知capability拒否、Unicode範囲、request診断のredaction、二重確定と古いsnapshotの分離、ack再送、epoch/focus拘束、候補世代、stop、256上限、未ack上限、非標準表拒否、文脈のcomposition単位取得、マーカーOFF・不正hash・fixture拒否を確認する。wire試験は**同一プロセス内のcodec roundtrip＋server adapter**であり、実Mach XPC通信やIMK操作の代用として完了扱いしない。
+
+Coreのskip6件のうちGPU5件は別途すべて成功。offline dataset builder専用試験1件は今回は未実行。ユーザー設定を変更する `testOptionPunctuationMappings` は従来どおり `--skip` で除外した。これらを成功件数へ入れない。
+
+再現用のCore環境変数は `AUTO_MIXED_RUNTIME_MODEL`、`AUTO_MIXED_PARITY_PATH`、`AUTO_MIXED_CONTEXT_PARITY_PATH`、`AUTO_MIXED_TRAINING_EXPORTS`、`AUTO_MIXED_APPROVED_EXPORTS` に、前節と同じ候補モデル／新規生成parity／v1/v2 fixture・承認済みexportを指定した。GPU5件はさらに `AUTO_MIXED_ZENZAI_RESOURCES=build/auto-mixed/runtime-resources` 相当のresource URLを指定し、学習OFF・一時領域で実行した。学習・新規データ取得・test splitでの調整はしていない。
+
+### 途中の失敗と修正
+
+- 初期Swift Testingコンパイルで、mutating ledgerメソッドを `#expect` へ直接渡すと生成closureの引数がimmutableになり失敗。3箇所を一度local変数へ評価する形に修正した。assertionの期待値は維持。`t5-core-first.log`。
+- Xcode一覧の初回は通常のDerivedData/cacheへのsandbox書込み制限で失敗。分離先とホスト実行へ変更して解決した。`t5-xcode-list.log` / `t5-xcode-isolated-list.log` / `t5-xcode-host-list.log`。依存の固定GitHubパッケージを解決したが、学習コーパスは取得していない。
+- 全体buildの初回は未初期化submoduleの4 marisa、2回目はGGUFが欠けて失敗。以前取得済みの5資源をreceipt照合後、一時symlinkでsourceの欠損場所へ置いて検証した。既存ファイルは上書きせず、最終build後に今回作った5リンクだけを削除した。`t5-xcode-build-first.log` / `t5-xcode-build-second.log`。
+- 3回目は新クライアントのMainActor initializer、menu、候補delegate呼出しがnonisolated contextから行われてコンパイル失敗。actor付きlazy property、既存Task、IMK menuのmain actor境界へ移して修正。4回目・最終buildは成功。`t5-xcode-build-third.log`。
+- 独立harness初回は固定依存の辞書submodule取得でsandboxのDNS制限により失敗。ホスト実行で固定依存を解決し、4件通過。`t5-thin-client-first.log` / `t5-thin-client-second.log`。
+- コード確認中に、確定直後のackが空文脈で次engineを作る不具合を修正した。ack/stopではengineを作らず、bufferが空になったら破棄する。新規回帰で、確定→ack→新規入力と全削除→新規入力の両方を検証した。
+
+native方式の非推奨、既存weak capture、macOS 13とllama最低13.3の差、署名OFFビルドでのinstall_name_toolによる署名無効化、AppIntents metadata未使用などの警告は残る。SwiftLintはコマンドが存在せず未実行。
+
+### 未実行事項・次に必要な作業
+
+**T5は接続コード・自動試験・ビルドまで。実機確認待ちとする。** 今回のappは `build/auto-mixed/xcode-derived/Build/Products/Debug/azooKeyMac.app` にある検証生成物で、インストール用完成品ではない。通常版と同じ識別子を持つため起動しなかった。AppDelegate起動時に既存IMEサーバー・辞書同期へ進むことを確認し、Xcodeのhosted testも実行していない。
+
+次は、通常版と識別できる試験版のbundle/Mach service/LaunchAgent/AppGroup・データ領域を準備してから、別途ユーザー操作による導入と他アプリでのIME試験へ進む。TextEdit・Chromium系・secure field・選択置換、OS commit/stop/deactivate順序、実XPC切断と再起動、Command操作、候補click、入力取りこぼしを確認する必要がある。現時点ではこれらを未実行とする。
+
+T6の中央編集・任意区間の原文／JA強制、複数spanでの対象選択、長時間のjournal/commit ledger上限・遅延、T7の広範な精度・性能・RSS・全ログ監査、T8の署名・配布権利表示・戻し方も残る。auto中の未対応キーはconsumeされ得る。追加650原文の人手確認とT3品質gateも未解決。実際の学習モデルの判別性能、日常使用の安定性は主張しない。
+
+通常IMEのインストール・削除・登録、LaunchAgent、ユーザー設定は変更していない。既存ユーザー変更の破棄はない。機能マーカーは分離した開発appの中だけに作成した。ユーザーの実入力・文脈は収集せず、試験ログはタスクで提示された例文と人工fixtureだけを使った。

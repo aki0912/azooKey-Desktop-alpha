@@ -6,12 +6,18 @@ if [ "${CONFIGURATION}" = "Release" ]; then
     swift_configuration=release
 fi
 
-swift build --package-path "${SRCROOT}/Core" --product ConverterServer -c "${swift_configuration}"
-
-server_source="${SRCROOT}/Core/.build/${swift_configuration}/ConverterServer"
+# Optional isolated, already-verified SwiftPM output for development Xcode builds.
+# Normal builds continue using the existing build command and directory.
+if [ -n "${AZOOKEY_PREBUILT_CONVERTER_SERVER_DIR:-}" ]; then
+    server_build_directory="${AZOOKEY_PREBUILT_CONVERTER_SERVER_DIR}"
+else
+    swift build --package-path "${SRCROOT}/Core" --product ConverterServer -c "${swift_configuration}"
+    server_build_directory="${SRCROOT}/Core/.build/${swift_configuration}"
+fi
+server_source="${server_build_directory}/ConverterServer"
+test -x "${server_source}"
 server_directory="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers/ConverterServer"
 server_destination="${server_directory}/ConverterServer"
-server_build_directory="${SRCROOT}/Core/.build/${swift_configuration}"
 mkdir -p "${server_directory}"
 cp "${server_source}" "${server_destination}"
 

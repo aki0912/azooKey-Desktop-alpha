@@ -170,6 +170,8 @@ mixed全体の確定時に表示文字列を1回だけOSへ挿入する。span�
 
 プロセスクラッシュをまたぐexactly-onceはこの仕様の保証外。
 
+**2026-09-24のT5実験実装との差分**：変換学習はpreview・確定ともOFFに限定した。`AutoMixedServerSession` は未ackの確定文字列を最大8件保持するが、候補tokenは学習用に保持せず、確定時にchildを解放する。理由は、OSへの同期確定とack後の学習を同時に導入せず、まず重複挿入を防ぐ契約を検証するため。影響として実験版IMEではユーザーの候補選択を学習しない。学習を有効にする前に上記pending candidate領域・一度だけの学習・ack喪失試験が必要である。
+
 ## 8. XPCと古い応答
 
 新規フィールド案：
@@ -189,6 +191,10 @@ snapshotと確定effectを同一視しない。古いsnapshotは破棄できる�
 
 フォーカス世代が違う応答を現在の入力欄へ適用しない。遅延確定は元クライアントとcompositionの対応が有効な間だけ適用する。deactivate時に新しい欄への挿入で帳尻を合わせない。OSによるcommit/stop順序の違いを実機テストする。
 
+実装済みwire契約は `ConverterSessionCommand.autoMixed(AutoMixedRequest)` と、optionalの `ConverterServerResponse.autoMixedCapability / autoMixed`。上のフィールド名は当初案であり、定義済みAPI名と混同しない。protocol version 1、server epoch、focus UUID、単調operationID、composition UUID、revision、raw、scalar/UTF-16 span、commit effectsを運ぶ。旧サーバーには既存 `.composition(.snapshot)` だけでcapabilityを問い合わせる。旧JSONで両optional fieldがない場合もdecodeできる。
+
+IMKの `commitComposition` は復帰前の即時確定を要求するため、実験クライアントは元の入力欄へ最後の表示を同期挿入し、古いfocusを失効させる。未応答キーがある場合は最後のack済みraw＋未応答打鍵から原文を復元する。影響は遅延時に漢字候補を保持できない場合があること。言語推定はクライアントで再実行しない。通常Enterの確定は引き続きserver commitID/ackを使う。実OSのイベント順序の確認は未実行。
+
 ## 9. 同期イベント所有権と障害
 
 既存routerはCommandを同期的に通し、pending中は保守的にconsumeする。[S4] autoでは、最終acknowledged状態にmixedのcomposition有無も加える。Tab/Space/Enterの判断をmanualの`InputState.event`だけに委ねない。
@@ -196,6 +202,8 @@ snapshotと確定effectを同一視しない。古いsnapshotは破棄できる�
 Commandを通す方針は維持するが、Cmd+A/C/Vやアプリ選択変更との整合性は実機gateで検証する。IMKの`handle`が返った後にキーを「返す」APIがあると仮定しない。疑似キー再送による回復は実装しない。
 
 サーバー一時切断時：既存の同一eventID再送機構の範囲内で復旧する。新サーバーepochでは確定済みか不明な操作を盲目的に再送しない。クライアントが保持する最終表示／原文回復情報は応答再適用と回復のための一時ledgerであり、別の推定状態機械を持たせない。メモリ内のみとし、同じ有効なcompositionの範囲で原文維持を優先する。
+
+初期auto transportでは上記の同一eventID再送を利用せず、順序queueの失敗通知で原文回復してmanualへ戻す。理由は既存キー再送が新epochでも継続するため。manual側の再送機構は維持する。autoの再接続後継続、保留journalの長時間上限、同時クラッシュ時の挙動はT7の障害評価に残す。
 
 サーバーとIMEの同時クラッシュ、OSが破棄したcomposition、失われた確定ackについて無損失を保証しない。正常稼働時の文字欠落／二重挿入はrelease blocker、障害時の残余リスクは明示して測定する。
 

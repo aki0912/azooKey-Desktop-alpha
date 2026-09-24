@@ -5,6 +5,11 @@ import InputMethodKit
 @objc(azooKeyMacInputController)
 class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // swiftlint:disable:this type_name
     let converterServerClient = ConverterServerClient()
+    @MainActor private lazy var mixedInput = AutoMixedIMEClient(server: converterServerClient) { [weak self] response in
+        self?.apply(response)
+    }
+    private var mixedModeMenuItem: NSMenuItem?
+    @MainActor var isAutomaticMixedInputActive: Bool { mixedInput.isActive }
     private var currentConverterView: ConverterSessionSnapshot?
     private(set) var inputState: InputState = .none
     private var inputLanguage: InputLanguage = .japanese
@@ -158,6 +163,11 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
         if let client = sender as? IMKTextInput {
             client.overrideKeyboard(withKeyboardNamed: Config.KeyboardLayout().value.layoutIdentifier)
+            mixedInput.activate(client: client) { [weak self] in
+                guard let self else { return false }
+                return self.inputState == .none && self.pendingKeyEventCount == 0
+                    && self.inputLanguage == .japanese && self.inputStyle == .defaultRomanToKana
+            }
         }
         // Chromium 系アプリで JS コンパイル中に activate された場合、
         // client.attributes(forCharacterIndex:) の同期呼び出しが deadlock を
@@ -174,6 +184,8 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     override func deactivateServer(_ sender: Any!) {
+        _ = mixedInput.finishImmediately(client: (sender as? IMKTextInput) ?? self.client(), keepMode: false)
+        mixedInput.deactivate()
         self.activationGeneration &+= 1
         self.pendingConverterServerActivation = nil
         self.converterServerClient.sendIfSessionOpen({ _ in .lifecycle(.deactivate) }, completion: { _ in })
@@ -188,6 +200,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     override func commitComposition(_ sender: Any!) {
+        if mixedInput.finishImmediately(client: (sender as? IMKTextInput) ?? self.client(), keepMode: true) { return }
         let activationGeneration = self.activationGeneration
         self.converterServerClient.sendIfSessionOpen({ _ in .composition(.commit) }, completion: { [weak self] response in
             Task { @MainActor in
@@ -213,6 +226,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
             let englishMode = value == "com.apple.inputmethod.Roman"
 
             if englishMode {
+                mixedInput.leaveForManual()
                 // 英語モードへの切り替え通知（実際の処理はhandleで行う）
                 // メニューバーやshortcut経由の切り替えに対応する。
                 // composing中でも英数キーMarkedTextを保ったまま英語入力へ移る。
@@ -239,7 +253,31 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     }
 
     override func menu() -> NSMenu! {
-        self.appMenu
+        if let resources = Bundle.main.resourceURL, AutoMixedExperiment.configuration(in: resources) != nil {
+            if mixedModeMenuItem == nil {
+                let item = NSMenuItem(title: "自動日英入力（実験）", action: #selector(toggleMixedInput), keyEquivalent: "")
+                item.target = self
+                item.toolTip = "Spaceは空白、Tabは候補。英字のみの入力中もTabではフォーカス移動しません。"
+                mixedModeMenuItem = item
+                appMenu.insertItem(item, at: 0)
+            }
+            MainActor.assumeIsolated { mixedModeMenuItem?.state = mixedInput.isActive ? .on : .off }
+        }
+        return self.appMenu
+    }
+
+    @MainActor @objc private func toggleMixedInput() {
+        if mixedInput.isActive {
+            mixedInput.requestedPolicy = .manual
+            mixedInput.leaveForManual()
+        } else if inputState == .none, pendingKeyEventCount == 0, let client = self.client() {
+            mixedInput.requestedPolicy = .automaticMixed
+            mixedInput.activate(client: client) { [weak self] in
+                guard let self else { return false }
+                return self.inputState == .none && self.pendingKeyEventCount == 0
+                    && self.inputLanguage == .japanese && self.inputStyle == .defaultRomanToKana
+            }
+        } else { NSSound.beep() }
     }
 
     // swiftlint:disable:next cyclomatic_complexity
@@ -249,6 +287,12 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         }
         guard event.type == .keyDown else {
             return false
+        }
+        if let handled = mixedInput.handle(event.keyEventCore, client: client, inputStyle: inputStyle, context: {
+            ConverterTextContext(leftSideContext: self.getLeftSideContext(maxCount: 30),
+                                 rightSideContext: self.getRightSideContext(maxCount: 30))
+        }) {
+            return handled
         }
 
         // カスタムプロンプトショートカットのチェック
@@ -396,7 +440,8 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     func requestPredictiveSuggestionWithConverterServer(client: IMKTextInput) -> Bool {
-        self.handleKeyEventWithConverterServer(
+        if mixedInput.isActive { return false }
+        return self.handleKeyEventWithConverterServer(
             event: KeyEventCore(
                 modifierFlags: [.control],
                 characters: "s",
@@ -502,6 +547,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     private func discardConverterServerComposition() {
+        if mixedInput.stop() { return }
         self.currentConverterView = nil
         self.converterServerClient.sendIfSessionOpen(
             { _ in .composition(.stopComposition) },
@@ -759,6 +805,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 extension azooKeyMacInputController: CandidatesViewControllerDelegate {
     func candidateSubmitted() {
         Task { @MainActor in
+            if mixedInput.select(index: nil, adopt: true) { return }
             guard self.currentConverterView != nil else {
                 return
             }
@@ -778,6 +825,7 @@ extension azooKeyMacInputController: CandidatesViewControllerDelegate {
 
     func candidateSelectionChanged(_ row: Int) {
         Task { @MainActor in
+            if mixedInput.select(index: row, adopt: false) { return }
             guard self.currentConverterView != nil else {
                 return
             }

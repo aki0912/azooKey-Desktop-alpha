@@ -20,6 +20,9 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
     private var sessions: [String: ConverterSession] = [:]
     private let kanaKanjiConverter = KanaKanjiConverter.withDefaultDictionary()
     private let learningDataCommitScheduler = DebouncedActionScheduler()
+    private let serverEpoch = UUID()
+    private var mixedRuntime: AutoMixedRuntime?
+    private var attemptedMixedRuntime = false
 
     func openSession(with reply: @escaping @Sendable (String) -> Void) {
         DispatchQueue.main.async {
@@ -36,6 +39,7 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
             MainActor.assumeIsolated {
                 let session = self.sessions.removeValue(forKey: sessionID)
                 if let session {
+                    session.autoMixed?.close()
                     self.kanaKanjiConverter.removeSession(session.conversionSessionID)
                 }
                 let removed = session != nil
@@ -118,6 +122,14 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
     private func handle(_ command: ConverterSessionCommand, sessionID: String) async throws -> ConverterServerResponse {
         let session = try getSession(sessionID)
         switch command {
+        case .autoMixed(let request):
+            // Child sessions must never be activated inside the legacy withSession.
+            guard let runtime = automaticMixedRuntime() else {
+                return ConverterServerResponse(snapshot: .empty,
+                    autoMixed: .rejected(request, epoch: serverEpoch, status: .unavailable))
+            }
+            if session.autoMixed == nil { session.autoMixed = runtime.makeSession(epoch: serverEpoch) }
+            return try session.autoMixed!.handle(request)
         case .lifecycle(let command):
             return try withConverterSession(session) {
                 handle(command, session: session)
@@ -136,6 +148,11 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
                 try handleKeyEvent(sessionID: sessionID, request: request)
             }
         case .composition(let command):
+            if case .snapshot = command {
+                var result = try withConverterSession(session) { handle(command, session: session) }
+                if automaticMixedRuntime() != nil { result.autoMixedCapability = .init(serverEpoch: serverEpoch) }
+                return result
+            }
             return try withConverterSession(session) {
                 handle(command, session: session)
             }
@@ -146,6 +163,17 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
         case .replaceSuggestion(let command):
             return try await handle(command, session: session)
         }
+    }
+
+    @MainActor
+    private func automaticMixedRuntime() -> AutoMixedRuntime? {
+        if !attemptedMixedRuntime {
+            attemptedMixedRuntime = true
+            guard AutoMixedExperiment.configuration(in: Self.appResourcesDirectoryURL()) != nil else { return nil }
+            mixedRuntime = try? AutoMixedRuntime(resources: Self.appResourcesDirectoryURL(),
+                converter: kanaKanjiConverter, applicationDirectory: AppGroup.memoryDirectoryURL())
+        }
+        return mixedRuntime
     }
 
     @MainActor
@@ -337,6 +365,12 @@ private final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
     }
 }
 
+// Dependency debug output can contain composition text. Silence experimental
+// processes before accepting input; the default manual process is unchanged.
+if AutoMixedExperiment.configuration(in: ConverterServer.appResourcesDirectoryURL()) != nil {
+    freopen("/dev/null", "w", stdout)
+    freopen("/dev/null", "w", stderr)
+}
 let listener = NSXPCListener(machServiceName: ConverterServerXPC.machServiceName)
 private let delegate = ServiceDelegate()
 listener.delegate = delegate

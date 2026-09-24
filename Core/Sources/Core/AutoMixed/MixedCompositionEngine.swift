@@ -1,7 +1,7 @@
 import Foundation
 
-/// Synchronous composition core. The isolated playground opts in; the server and manual
-/// input path do not construct it. Providers must be injected; there is no default test model.
+/// Synchronous composition core. The playground and experimental server opt in;
+/// the manual path is separate. Providers are injected; there is no default test model.
 @MainActor public final class MixedCompositionEngine {
     public private(set) var buffer = RawCompositionBuffer()
     public private(set) var spans: [MixedSpan] = []
@@ -10,6 +10,7 @@ import Foundation
     public private(set) var usedRawFallback = false
     public private(set) var selectionIndex: Int?
     public private(set) var selectionOptions: [MixedCandidate] = []
+    public var selectedSpanID: UUID? { selectingSpanID }
 
     private let segmenter: any LanguageSegmenter
     private let converter: any JapaneseSpanConverting
