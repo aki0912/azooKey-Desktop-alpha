@@ -6,13 +6,17 @@ struct RomanSpanReading {
     let prefix: String
     let suffix: String
     let reading: String
+    let completesTerminalN: Bool
+    /// Conversion-only copy; hyphens remain unchanged in the original buffer/ranges.
+    var conversionInput: String { Self.conversionInput(prefix) }
+    private static func conversionInput(_ raw: String) -> String { raw.replacingOccurrences(of: "-", with: "ー") }
 
     /// Last independent input-table segment, which can contain several kana (kya, tte, nki).
     /// Check both halves against the full reading; never split an input-table dependency.
     static func splitFinalKana(_ raw: String) -> (prefix: String, tail: String)? {
         guard let parsed = parse(raw), parsed.suffix.isEmpty else { return nil }
         var full = ComposingText()
-        full.insertAtCursorPosition(raw, inputStyle: .roman2kana)
+        full.insertAtCursorPosition(conversionInput(raw), inputStyle: .roman2kana)
         guard let boundary = full.inputIndexToSurfaceIndexMap().keys.filter({ $0 > 0 && $0 < raw.count }).max() else {
             return nil
         }
@@ -24,12 +28,23 @@ struct RomanSpanReading {
     }
 
     static func parse(_ raw: String) -> Self? {
-        // Here each input element is exactly one scalar. Never apply this mapping to Unicode raw.
+        // The admitted characters are each one scalar/grapheme. Hyphen normalization
+        // changes neither count; arbitrary Unicode input must not use this mapping.
         guard !raw.isEmpty, raw.unicodeScalars.allSatisfy({
-            (97...122).contains($0.value) || $0.value == 39
+            (97...122).contains($0.value) || $0.value == 39 || $0.value == 45 || $0.value == 0x30FC
         }) else { return nil }
         var full = ComposingText()
-        full.insertAtCursorPosition(raw, inputStyle: .roman2kana)
+        full.insertAtCursorPosition(conversionInput(raw), inputStyle: .roman2kana)
+        // A Japanese long-vowel word can preview its terminal n as ん. Use the
+        // dependency's end-of-composition rule; rebuild from raw on every next key.
+        // Ordinary pending roman tails (asitan, etc.) retain their existing behavior.
+        if raw.contains("-") || raw.contains("ー"), raw.hasSuffix("n"), full.convertTarget.hasSuffix("n") {
+            var completed = full
+            completed.insertAtCursorPosition([.init(piece: .compositionSeparator, inputStyle: .roman2kana)])
+            if completed.convertTarget.allSatisfy(isKana) {
+                return Self(prefix: raw, suffix: "", reading: completed.convertTarget, completesTerminalN: true)
+            }
+        }
         let surface = Array(full.convertTarget)
         let kanaCount = surface.prefix(while: isKana).count
         // An interior untranslated sequence is not a valid Japanese run.
@@ -52,10 +67,10 @@ struct RomanSpanReading {
             .max { $0.key < $1.key }?.key ?? 0
         let prefix = String(raw.prefix(boundary))
         var complete = ComposingText()
-        complete.insertAtCursorPosition(prefix, inputStyle: .roman2kana)
+        complete.insertAtCursorPosition(conversionInput(prefix), inputStyle: .roman2kana)
         guard complete.convertTarget.allSatisfy(isKana),
               full.convertTarget.hasPrefix(complete.convertTarget) else { return nil }
-        return Self(prefix: prefix, suffix: String(raw.dropFirst(boundary)), reading: complete.convertTarget)
+        return Self(prefix: prefix, suffix: String(raw.dropFirst(boundary)), reading: complete.convertTarget, completesTerminalN: false)
     }
 
     private static func isKana(_ character: Character) -> Bool {

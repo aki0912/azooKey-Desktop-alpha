@@ -147,8 +147,8 @@ public enum JapaneseSpanBridgeError: Error { case invalidToken, missingZenzaiWei
                     child.manager.activate()
                     child.manager.reloadUserDictionary()
                 }
-                return child.manager.replaceCompositionFromRaw(parsed.prefix, leftContext: request.leftContext,
-                                                        rightContext: request.rightContext, rich: request.rich)
+                return child.manager.replaceCompositionFromRaw(parsed.conversionInput, leftContext: request.leftContext,
+                    rightContext: request.rightContext, rich: request.rich, completeRomanInput: parsed.completesTerminalN)
             }
             candidateRequestCount += 1
             if expectedModelStatus != nil, backend != .zenzaiReady { return try fallback(.modelUnavailable) }

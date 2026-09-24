@@ -64,6 +64,50 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test func installedHelperConvertsLongVowelWordsAndKeepsOriginalRanges() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-long-vowel-probe-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, action: action))))
+        }
+        for (raw, expected) in [("harike-n", "ハリケーン"), ("harike-nn", "ハリケーン"),
+                                ("ko-hi-", "コーヒー"), ("su-pa-", "スーパー"), ("ra-men", "ラーメン")] {
+            var prefix = ""
+            for character in raw {
+                prefix.append(character)
+                let response = try await send(.key(.init(modifierFlags: [], characters: String(character),
+                    charactersIgnoringModifiers: String(character), keyCode: 0)))
+                #expect(response.autoMixed?.raw == prefix)
+                #expect(response.autoMixed?.status == .ready)
+            }
+            let selection = try await send(.key(.init(modifierFlags: [], characters: "\t", charactersIgnoringModifiers: "\t", keyCode: 48)))
+            let mixed = try #require(selection.autoMixed)
+            #expect(mixed.spans.count == 1)
+            #expect(mixed.spans.first?.sourceRange == (try ScalarRange(0, raw.unicodeScalars.count)))
+            guard case .selecting(let candidates, _) = selection.snapshot.candidateWindow else {
+                Issue.record("Expected whole-word candidates"); continue
+            }
+            let index = try #require(candidates.firstIndex { $0.text == expected }, "authored: \(raw)")
+            _ = try await send(.selectCandidate(index: index, revision: mixed.revision, adopt: true))
+            let commit = try #require(try await send(.commit).autoMixed?.commits.first)
+            #expect(commit.text == expected)
+            _ = try await send(.commitApplied(commit.commitID))
+        }
+        _ = try await send(.key(.init(modifierFlags: [], characters: "harike-n", charactersIgnoringModifiers: "harike-n", keyCode: 0)))
+        _ = try await send(.key(.init(modifierFlags: [], characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", keyCode: 53)))
+        let rawCommit = try #require(try await send(.commit).autoMixed?.commits.first)
+        #expect(rawCommit.text == "harike-n")
+        _ = try await send(.commitApplied(rawCommit.commitID))
+        try await probe.close(session)
+    }
+
     @Test func installedHelperPrefersJapanesePunctuationExceptAfterEnglish() async throws {
         let probe = MixedIMEProbe()
         let session = "installed-punctuation-probe-" + UUID().uuidString

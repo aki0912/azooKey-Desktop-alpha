@@ -1,6 +1,6 @@
 # Auto Mixed Input 実装状況
 
-2026-09-24時点。**かなキーによる自動解除は修正・実機解消確認済み。自動モードの `- . , [ ]` を日本語優先で `ー 。 、 「 」` にする修正版も反映済み。英語直後と既存保護token・数値は半角を維持する。Core回帰、アプリビルド・署名、導入済み実サーバーの記号試験が成功。記号修正後の物理打鍵は未確認。** 最新記録は末尾の「自動モードの日本語優先記号」を参照。
+2026-09-24時点。**長音の前後で日本語の単語が分かれる不具合を修正し、Mixedへ反映済み。`harike-n`／`harike-nn` から「ハリケーン」を一語の候補として取得・確定できることを導入済み実サーバーで確認した。Core回帰・IMK境界・既存記号／apple回帰も成功。今回の修正後の物理打鍵は未確認。** 最新記録は末尾の「長音を含む語の変換修正」を参照。
 
 計700原文（増強後3,907行）でv1/v2のLR学習・校正・exportは実施済みだが、品質基準未達のためT3全体は未完了、候補モデルはrelease_ready=false。追加650件の人手確認も未実施。fixtureと候補モデルのPython／Swift数値一致を確認したことと、実入力での判別性能・v2の優位性を区別する。T6全体・T7/T8は未完了。以下の各stageは当時の資料パス・実行結果を含む履歴である。
 
@@ -1219,3 +1219,38 @@ macOS 27 arm64／Xcode 27／Swift 6.4。
 導入済みhelperへの実Mach XPC試験は3件成功、skipなし、1.573秒（`punctuation-installed-tests.log`）。新規試験で `asita.` → `明日。`、`asita,` → `明日、`、`asita-` → `明日ー`、`[apple]` → `「apple」`、日本語確定後の `apple-.,` の原文維持、確定左文脈ごとの単独period、小数・URL保持、Escape後の原文確定を確認した。旧apple確定後回帰とmeeting混在・二重確定防止の2件も成功。
 
 `git diff --check` 成功。現時点のテスト／ビルド失敗はなし。これは実サーバーの人工入力試験であり、Codex／メモでの修正後の物理打鍵を確認したとはしない。次はMixed自動を選んで通常利用で確認できる状態。secure field・長時間入力・記号周辺の広範なモデル精度評価は未実行。変更は未コミット。
+
+## 長音を含む語の変換修正（2026-09-24）
+
+利用者から「ーを含む単語、はりけーん等が変換できない」と報告され、入力列は `harike-n` と確認した。HEADは `1507f97f43133fb17edc8b7896ea48b1e5e62279`。前回の記号修正は未コミットで、その差分を保持して今回の修正を追加した。会話AGENTS、実装記録、実際のparser／segmenter／bridge／SegmentsManagerと固定依存のComposingText・標準ローマ字表を確認した。
+
+### 原因と変更
+
+記号policyは `-` の表示だけを `ー` にしており、segmenterとRomanSpanReadingは単語全体を日本語候補へ渡していなかった。`harike-nn` はharike／ハイフン／nnに分かれ、候補選択では末尾「ん」の候補だけが出ていた。さらに依存の `.roman2kana` はハイフンを長音へ正規化せず、元のテキストをそのまま渡すだけでは解決しなかった。
+
+- 日本語と判断した先頭runの後に長音がある場合、標準ローマ字として成立する一続きの範囲をjapaneseRomanとして変換器へ渡す。先頭が英語ならこの結合を行わない。保護token・数値・空白・句読点・結合文字の書記素境界は越えない。`su-pa-` のpa／`ra-men` のmenを途中で別英単語として扱わず、一語全体で読む。
+- RomanSpanReadingとbridgeの変換用コピーだけでハイフンを長音へ変換。rawとsourceRange、モデル特徴量は元のまま。候補は既存辞書／Zenzaiから取り、特定の単語や候補をハードコードしない。
+- 長音を含む語の終端nが依存のcompositionSeparatorでかなになる場合のみ、その公開APIで「ん」としてpreviewする。合成終端はconverter内だけで、sourceRangeや原文に追加しない。`harike-no`／`harike-nya`への継続、Backspace、Escapeで原文復帰できる。既存の `asitan` → `明日n` の期待値は維持した。
+- SegmentsManagerのmixed専用bulk previewに終端処理の任意引数（既定false）を追加し、bridgeだけから指定する。通常manualのキー入力・確定・候補処理は変更しない。仕様03章§11.3と利用手順を更新した。モデル・辞書・学習データ・依存revision・XPC/schemaは不変、学習OFF。
+
+### 検証・失敗と修正理由
+
+macOS 27 arm64／Xcode 27／Swift 6.4。試験入力は人工例で、利用者の本文や文脈を収集していない。
+
+1. 修正前の2試験で6 assertion／require失敗（`build/auto-mixed/long-vowel-before.log`）。spanの分割、全語候補の欠如、parser拒否を再現した。初期試験では依存自体が `-` を長音へ変えると誤って期待していたが、実際は「はりけ-ん」。依存定義を確認し、試験を「依存はhyphenを保持／新adapterだけが正規化」の契約へ修正した。読みや候補の期待値は維持した。
+2. 初回修正後の関連25件で6失敗（`long-vowel-first-fix.log`）。ハリケーンとコーヒーは通ったが、su-pa-／ra-menがpa／menの英語判定で分割された。日本語の長音単語内の断片を独立判定しない形に修正し、スーパー／ラーメンの期待値を維持した。
+3. 次の実行ではmeeting-roomを完全な英語で保持する新テスト1件が失敗（`long-vowel-final-unit.log`）。HEADの変更前segmenterを一時harnessに読み込んで比較すると、旧実装／修正後の双方が `meeting-ろおm`（`long-vowel-baseline-comparison.log`、比較1件成功・0.586秒）。これは既存モデルのroom判定であり今回の長音変更で起きた差ではない。新テストの対象を英語直後のハイフン保持・raw保持へ限定し、未解決のモデル判定として記録した。既存テストの期待値は変更していない。一時比較ソースへのリンクは削除済みで、成果物はbuild内だけ。
+4. 最終Core回帰はrunner集計182件・23 suite成功、22.962秒（`long-vowel-core-regression.log`）。長音を含む5例の逐次入力・一語span・実辞書候補・候補採用／確定、n/nn/no/nya、削除・再入力、Unicode双方向範囲・結合文字、Escape、URL／ファイル／英語／数値の保全を確認。v1/v2 parity・既存記号・apple／meeting・pending n回帰も成功。実GGUF専用6件、導入済みhelper4件、データbuilder専用1件はこの実行でskip。ユーザー設定を書き換える既存 `testOptionPunctuationMappings` は明示除外した。
+5. 実IMKクライアントの模擬境界11件成功、0.008秒（`long-vowel-client.log`）。かなキー維持・原文保全・フォーカス移動の回帰を確認。`git diff --check` 成功。
+
+この時点ではbuild／導入／実サーバーの新試験は未完了。物理打鍵、secure field、長時間入力も未確認。SwiftLintはコマンドがないため未実行。既存のビルド警告とテスト用一時学習ファイル不在の診断出力は残る。通常IMEへのインストール・削除・登録変更は行わない。
+
+### 反映と実サーバーの最終検証
+
+アプリ全体buildとstrict署名検証成功（`build/auto-mixed/long-vowel-build.log`）、更新dry-run成功（`long-vowel-update-dry-run.log`）。入力ソースを読むとABCだったため、専用updateを実行して成功（`long-vowel-update.log`）。登録・有効化をやり直さず、前後のモード状態とABC選択を保持（`long-vowel-status-before.json` / `long-vowel-status-after.json`）。
+
+導入先とbuildのapp／helper／モデルのSHA-256は一致（`long-vowel-installed-hashes.json`）。appは `88df4351257c12e38725ac5102702bc6b436008f598a1ece1f8cc6a4c06efc2d`、helperは `6a8633650758bba308ae14ffa4465fe024c4a0228547f33c5dfb178db0c5b8d3`。モデルは従来の `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` のまま。診断はOFF、通常IMEのファイル・設定・登録は変更していない。
+
+実Mach XPC試験4件成功、skipなし、2.770秒（`long-vowel-installed-tests.log`）。新試験でharike-n／harike-nn、ko-hi-、su-pa-、ra-menを一文字ずつ入力し、元のrawと範囲を保った一語span、ハリケーン／コーヒー／スーパー／ラーメンの候補選択・確定、Escapeの原文確定を確認した。既存の句読点・英語直後の記号・括弧・URL・数値・apple・meeting・二重確定防止の3試験も成功。実サーバーの人工入力試験であり、実IMKの物理打鍵確認とは区別する。
+
+作業途中、HEADが前回記号修正のcommit `d8cea7bb7c198cc969da605a3e67f84f872b6227` へ進んでいることを確認した。こちらからcommit操作は行わず、今回の長音修正差分と既存変更を保持した。最終 `git diff --check` 成功。今回の長音修正は未コミット。Mixed自動へ戻して通常利用で確認できる状態。物理打鍵・secure field・長時間利用は未確認。

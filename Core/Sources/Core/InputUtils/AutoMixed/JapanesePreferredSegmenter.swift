@@ -30,7 +30,8 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
     public func segment(_ raw: String) throws -> [MixedSpan] {
         let source = TextOffsetMap(raw)
         guard source.scalarCount <= 4096 else { reset(); throw AutoMixedError.invalidRange }
-        let protection = ProtectedSpanDetector.detect(raw).scalars
+        let protected = ProtectedSpanDetector.detect(raw)
+        let protection = protected.scalars
         let prior = try baseline.segment(raw)
         let unchangedPrefixCount = zip((previousRaw ?? "").unicodeScalars, raw.unicodeScalars).prefix { $0.0 == $0.1 }.count
         let features = ContextualCharacterFeatures(raw, leftContext: context)
@@ -76,6 +77,9 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                 if english {
                     result.append(MixedSpan(sourceRange: range, kind: .raw))
                     nextEnglish.append(EnglishRegion(range: range, raw: word))
+                } else if let joined = try longVowelSpan(from: range, source: source, protected: protected) {
+                    result.append(joined)
+                    end = joined.sourceRange.upperBound
                 } else if let split = try embeddedEnglishSplit(inherited, in: range, source: source, scores: scores,
                                                                unchangedPrefixCount: unchangedPrefixCount) {
                     result += split
@@ -130,6 +134,31 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         previousEnglish = nextEnglish
         previousRaw = raw.isEmpty ? nil : raw
         return result
+    }
+
+    /// Join Japanese roman runs through long vowels before requesting candidates.
+    /// A recognized English prefix keeps its hyphen. Once the prefix is Japanese,
+    /// validate the whole spelling: fragments such as pa/men inside su-pa-/ra-men
+    /// must not be judged as independent English words. Protection inputs stay original.
+    private func longVowelSpan(from first: ScalarRange, source: TextOffsetMap, protected: ProtectedText) throws -> MixedSpan? {
+        let scalars = Array(source.text.unicodeScalars)
+        guard let initial = RomanSpanReading.parse(try source.slice(first)),
+              !initial.reading.isEmpty, initial.suffix.isEmpty else { return nil }
+        var end = first.upperBound
+        var hasLongVowel = false
+        while end < scalars.count, !protected.verbatimScalars[end],
+              source.isGraphemeBoundary(end), source.isGraphemeBoundary(end + 1),
+              scalars[end] == "-" || scalars[end] == "ー" {
+            if end + 1 < scalars.count, (48...57).contains(scalars[end + 1].value) { break }
+            hasLongVowel = true
+            end += 1
+            while end < scalars.count, protected.scalars[end] == .inferred { end += 1 }
+        }
+        guard hasLongVowel else { return nil }
+        let range = try ScalarRange(first.lowerBound, end)
+        guard let parsed = RomanSpanReading.parse(try source.slice(range)),
+              parsed.suffix.isEmpty || end == scalars.count else { return nil }
+        return MixedSpan(sourceRange: range, kind: .japaneseRoman)
     }
 
     /// Recover one complete English word using only model-proposed RAW boundaries.

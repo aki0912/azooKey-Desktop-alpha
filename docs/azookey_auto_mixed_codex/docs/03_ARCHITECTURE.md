@@ -241,3 +241,13 @@ policyはliteralに含まれる `- . , [ ]` だけを置換する。全置換は
 新しいcompositionの左端は既存の短い確定文脈から判断する（末尾のASCII英字は英語の表示証拠として扱う）。文脈がない場合は日本語優先。この値はメモリ内のみ。`refreshCandidates` が後続日本語spanへ渡す左側表示、marked text、Tabの記号候補、Enter／OS確定の内容で同じpolicyを使う。EscapeのrawPreviewとprovider失敗時は原文を維持する。XPCのschema、SpanKind、モデルschemaは追加・変更しない。
 
 旧仕様「全ASCII記号をliteral表示」からの差分であり、日常の日本語入力で句読点・かぎ括弧・長音を打てるようにするための変更。T0〜T2の既定rendererやmanualを変えず、Mixedの試用runtime／playgroundで有効にする。英文や数値の直後の句読点を日本語にしたい場合など、文脈だけでは意図を断定できない制約は残る。原文復帰と保護token保持を優先する。
+
+### 11.3 長音を含む日本語の変換単位（2026-09-24）
+
+表示だけの `-` → `ー` では `harike-n` が長音の前後で分割され、単語全体を辞書へ渡せなかった。JapanesePreferredSegmenterは日本語と判断した先頭runに長音と標準ローマ字として成立する後続runが連なる場合、全体を一つのjapaneseRoman spanにする。英語と判定済みの先頭run、数値隣接、保護token、空白・句読点・Unicode書記素境界を越えて結合しない。`su-pa-` のpa、`ra-men` のmenを独立した英単語とみなして途中分割せず、長音を含む綴り全体を検証する。英語との混在意図が曖昧な長音列では日本語を優先し、Escapeで原文へ戻せる。
+
+依存の標準ローマ字表はASCII `-` を自動で `ー` にしない。RomanSpanReadingは変換用コピーのみ `-` を `ー` にし、bridgeはそのコピーを既存ComposingTextへ渡す。元のraw、特徴量、モデル入力、scalar範囲は変更しない。両文字とも1 scalar／1 UTF-16単位で、読みに変わったspanは既存のatomicな座標対応を使う。
+
+利用者が使う `harike-n` の末尾nも変換するため、長音を含み、依存のcompositionSeparator規則で全体がかなになる場合だけ終端nを「ん」としてpreviewする。依存の公開 `insertAtCursorPosition([InputElement])` と `.compositionSeparator` の定義・試験を確認して使用した。合成した終端要素は変換器の中だけにあり、rawや元の範囲に加えない。次の編集では原文から再構成し、no／nyaなどを継続できる。従来の `asitan` → `明日n` は維持する。OSへ早期確定しない。
+
+長音を含む日本語spanは読みだけに限定せず通常の辞書／Zenzai候補を要求する。学習済み確率や判定閾値を変更するものではない。manualの入力経路、モデルschema、XPC version 1、v1/v2 goldenは不変。

@@ -580,10 +580,14 @@ public final class SegmentsManager {
     /// The bridge supplies a validated, complete roman prefix and activates its child session.
     @MainActor
     func replaceCompositionFromRaw(
-        _ raw: String, leftContext: String?, rightContext: String?, rich: Bool
+        _ raw: String, leftContext: String?, rightContext: String?, rich: Bool,
+        completeRomanInput: Bool = false
     ) -> [Candidate] {
         self.composingText = ComposingText()
         self.composingText.insertAtCursorPosition(raw, inputStyle: .roman2kana)
+        if completeRomanInput {
+            self.composingText.insertAtCursorPosition([.init(piece: .compositionSeparator, inputStyle: .roman2kana)])
+        }
         self.lastInputStyle = .roman2kana
         self.lastOperation = .insert
         self.selectionIndex = nil
