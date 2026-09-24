@@ -101,14 +101,17 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     private var sourceScalarCount = 0
     private let leftContext: String?
     private let rightContext: String?
+    private let allowJapaneseReadingFallback: Bool
     public private(set) var lastResults: [UUID: JapaneseSpanResult] = [:]
 
     public init(bridge: ZenzaiSpanBridge, sessionID: UUID,
-                leftContext: String? = nil, rightContext: String? = nil) {
+                leftContext: String? = nil, rightContext: String? = nil,
+                allowJapaneseReadingFallback: Bool = false) {
         self.bridge = bridge
         self.sessionID = sessionID
         self.leftContext = leftContext.map { String($0.suffix(30)) }
         self.rightContext = rightContext.map { String($0.prefix(30)) }
+        self.allowJapaneseReadingFallback = allowJapaneseReadingFallback
     }
 
     public func prepare(revision: UInt64, sourceScalarCount: Int, retaining spanIDs: Set<UUID>) {
@@ -126,10 +129,14 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
         if span.kind == .japaneseKana {
             // Reading-only tails create no converter child or learnable Candidate token.
             guard span.sourceRange.count == raw.unicodeScalars.count,
-                  span.sourceRange.upperBound == sourceScalarCount,
-                  let parsed = RomanSpanReading.parse(raw), parsed.suffix.isEmpty,
-                  !parsed.reading.isEmpty else { return [] }
-            return [MixedCandidate(token: UUID().uuidString, text: parsed.reading)]
+                  span.sourceRange.upperBound <= sourceScalarCount,
+                  let parsed = RomanSpanReading.parse(raw),
+                  parsed.suffix.isEmpty || span.sourceRange.upperBound == sourceScalarCount else { return [] }
+            if !allowJapaneseReadingFallback {
+                guard span.sourceRange.upperBound == sourceScalarCount, parsed.suffix.isEmpty,
+                      !parsed.reading.isEmpty else { return [] }
+            }
+            return [MixedCandidate(token: UUID().uuidString, text: parsed.reading + parsed.suffix)]
         }
         let left = leftDisplay.isEmpty ? leftContext : (leftContext ?? "") + leftDisplay
         let result = try bridge.candidates(for: JapaneseSpanRequest(

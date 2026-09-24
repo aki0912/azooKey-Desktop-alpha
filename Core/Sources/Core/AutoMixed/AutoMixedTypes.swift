@@ -79,6 +79,11 @@ public struct MixedCandidate: Sendable, Equatable {
 /// Injection boundary only; T1 supplies no production classifier or model loader.
 public protocol LanguageSegmenter {
     func segment(_ raw: String) throws -> [MixedSpan]
+    func reset()
+}
+
+public extension LanguageSegmenter {
+    func reset() {}
 }
 
 /// Preview-only boundary. No learning or OS insertion is performed by the pure engine.

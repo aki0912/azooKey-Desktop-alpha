@@ -44,6 +44,8 @@ private final class PlaygroundState: ObservableObject {
     @Published var status = "モデルを読み込み中"
     @Published var rawPreview = false
     private var model: LogisticLanguageModel?
+    private var englishLexicon: EnglishLexicon?
+    private var englishPolicy: EnglishDecisionPolicy?
     private var bridge: ZenzaiSpanBridge?
     private var engine: MixedCompositionEngine?
     private let focus = UUID()
@@ -69,21 +71,25 @@ private final class PlaygroundState: ObservableObject {
             self.bridge = try ZenzaiSpanBridge(converter: .withDefaultDictionary(), applicationDirectory: directory,
                                               useZenzai: resources != nil, resources: resources, learningEnabled: false)
             self.model = model
+            self.englishLexicon = try EnglishLexicon.bundled()
+            self.englishPolicy = try EnglishDecisionPolicy.bundled()
             try resetEngine()
             try refresh()
         } catch {
-            self.error = "起動できません。v2学習済みモデルと、指定した変換資源を確認してください。"
+            self.error = "起動できません。v2学習済みモデル、英単語辞書、変換資源を確認してください。"
         }
     }
 
     private func resetEngine() throws {
         engine?.cancel()
-        guard let model, let bridge else { return }
+        guard let model, let bridge, let englishLexicon, let englishPolicy else { return }
         let context: CommittedLeftContext = useContext ? .available(committed) : .unavailable
         engine = try MixedCompositionEngine(
-            segmenter: TrainedMixedSegmenter(model: model, context: context, focus: focus),
+            segmenter: JapanesePreferredSegmenter(model: model, lexicon: englishLexicon, policy: englishPolicy,
+                                                 context: context, focus: focus),
             converter: MixedSessionConverter(bridge: bridge, sessionID: focus,
-                                             leftContext: useContext ? String(committed.suffix(30)) : nil)
+                                             leftContext: useContext ? String(committed.suffix(30)) : nil,
+                                             allowJapaneseReadingFallback: true)
         )
     }
 
@@ -152,7 +158,7 @@ private final class PlaygroundState: ObservableObject {
         case .zenzaiUnavailable: backend = "Zenzai · 読込失敗（原文を表示）"
         case nil: backend = "変換資源なし"
         }
-        status = "\(backend) · \(model?.modelVersion ?? "モデル未読込")"
+        status = "日本語優先・英単語判定あり · \(backend) · \(model?.modelVersion ?? "モデル未読込")"
     }
 }
 
@@ -166,7 +172,7 @@ private struct PlaygroundView: View {
                 Text("試用版").font(.caption.bold()).padding(6).background(.orange.opacity(0.15)).cornerRadius(6)
                 Spacer()
             }
-            Text("ローマ字と英語をそのまま入力すると、判定した日本語の部分を変換します。")
+            Text("日本語を優先して変換し、英単語の根拠が強い区間はアルファベットで残します。")
             Text(state.status).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 .accessibilityIdentifier("mixed-model-status").id(state.status)
             Toggle("この画面で確定した文章を左文脈に使う（末尾30文字）", isOn: $state.useContext)

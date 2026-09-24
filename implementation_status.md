@@ -805,3 +805,53 @@ T3の精度改善と独立test、T6の編集／表示安定化、T7の入力追�
 広範な英語誤変換率・typing trace・入力遅延・実機IME／他アプリ・Xcode全体build・SwiftLintは未実行。今回の有限例の通過から一般的な精度や速度を主張しない。環境は引き続きmacOS 27.0 arm64／Swift 6.4／Xcode 27。実Zenzaiテストは一時領域・学習OFF・ホストGPUで実行し、LaunchServices経路の再検証は行っていない。ユーザーの入力・文脈は永続化せず、ログ中の入力は明示した試験例と人工fixtureだけ。
 
 通常IMEの機能フラグはOFF、manual／XPC／IMKの入力経路は未変更。IMEのインストール・削除・登録・ユーザー設定変更、追加学習やデータ取得は行っていない。T5接続へ進む前提は維持し、T6全体・T7の品質評価は引き続き未完了。
+
+## 日本語優先とローカル英単語判定を試用アプリへ追加（2026-09-24）
+
+利用者の「基本は日本語、高い確率で英語と判断した場合に英語を維持したい」という希望と、その方針でのコード変更依頼に対応した。開始HEADは `fd9fd0639d12d1e1eacefdbb2bf399bc21962fd8`、開始時のgit statusはclean。前節までの末尾表示がコミット済みであることを確認した。リポジトリ内にAGENTS.mdはなく、会話で指定された指示を適用した。
+
+### 変更と仕様差分
+
+- 新設 `JapanesePreferredSegmenter` を試用アプリの既定にした。従来の `TrainedMixedSegmenter` とT2/T3判定器は回帰基準として維持する。従来の保留表示は日本語を取り逃しやすいため、英語の根拠が十分でない有効なローマ字を日本語表示へ進める。これは**表示方針の変更**であり、学習済みモデルの精度改善や再学習ではない。
+- 英語には辞書一致と現在のrawに対するモデルスコアを併用する。半数以上の位置がpJA<0.5であることに加え、SCOWL level 10/20の完全一致ではpJA平均0.60以下、level 35では0.35以下、3文字未満では0.15以下を要求する。末尾prefixは3文字以上・level 10/20の単語prefix・平均0.20以下に限定する。これらは試用のための初期値であり、校正された英語確率・devで最適化した閾値とは扱わない。`english-policy.json` で独立して調整できる。
+- 同じ英語区間の追加入力・末尾削除には平均上限を0.10緩める維持条件を設けた。前方の原文不変、同じ開始位置、辞書／prefix条件とRAW寄り位置の割合は引き続き必要。関係のない置換・前方編集へ維持条件を引き継がない。確定・取消・空入力・provider失敗時には `LanguageSegmenter.reset()` を呼ぶ。既存のstateless判定器にはdefault no-opを提供する。原文と英語判定の履歴はメモリ上の現compositionだけで、保存・送信しない。
+- 英語条件を満たさず標準ローマ字表で成立する部分は、pJA平均が既存hold値0.65以上ならかな漢字候補、それ未満なら読みを表示する。未完子音は末尾だけ元の英字で残す。従来の `asitano + te` の漢字／かな境界は、読みの独立性を維持できる場合に残す。全体が有効なローマ字なら内部の任意substringを辞書検索しないため、`asitanote` のnoteを英語として切り出さない。
+- 全体がローマ字として不成立の場合は既存判定器の境界だけを利用し、`meeting + desu` 等を扱う。URL・メール・コード・略語・Unicode literal・空白の既存保護を先に適用する。不成立入力や境界の見逃しでは原文保持が残る。made/no/to/nameの無条件保留リストは導入していない。
+- 読み表示の拡張は `MixedSessionConverter(allowJapaneseReadingFallback: true)` で明示的に有効化する。既定falseは従来の「完成した末尾だけ」という契約を維持する。読み表示にはConverter childや学習可能tokenを作らない。既存テストの期待値を弱めず、新方針を別のテストで確認する。
+
+詳細な理由・条件・影響は `docs/azookey_auto_mixed_codex/docs/04_MODEL_AND_DATA.md` §3.3、試用手順は `Tools/AUTO_MIXED_PLAYGROUND.md` に追記した。主な実装は `Core/Sources/Core/InputUtils/AutoMixed/{EnglishLexicon,JapanesePreferredSegmenter}.swift`。モデルschema 2、特徴量v1/v2、係数・モデル閾値・LR・Viterbi・goldenは変更していない。モデルversionは `offline-retuned-302c6220b7f569e5`、SHA-256は `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` のまま。
+
+### 辞書の取得・権利・用途
+
+[SCOWL 2020.12.07の公式配布](https://sourceforge.net/projects/wordlist/files/SCOWL/2020.12.07/)を取得した。対応するupstream revisionは `5ef55f9c42730ebe4394a78b77855468a6f15dd2`。archiveは2,569,810 bytes、SHA-256は `5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc`。[公式Copyright](https://raw.githubusercontent.com/en-wl/wordlist/rel-2020.12.07/scowl/Copyright)にある利用・複製・改変・配布の許諾と、構成データごとの表示条件を確認し、原文Copyrightをそのまま同梱した。
+
+`Tools/build_auto_mixed_english_lexicon.py` は固定checksumを照合してから、米英のword/contraction表のlevel 10/20/35だけを読み、ASCII小文字の正確な綴り（内部apostrophe可、32文字以下）を保持する。重複は最小levelで統合する。archiveの一括展開や外部コードの実行は行わない。派生表は **50,957語・622,063 bytes**。`EnglishLexiconResources` に取得元、入力ファイル別checksum、出力checksum、加工説明、原文Copyrightを保存し、Coreのresource bundleへ追加した。levelは語の一般性の分類であり、実測頻度ではない。
+
+**辞書はローカル実行時照合専用**。train/dev/calibration/test、学習manifest、学習済み成果物には混ぜていない。権利未確認コーパスの取得や追加学習は行っていない。名前・製品名・新語などの網羅性はない。ネットワーク制限内の取得は名前解決に失敗したため、依頼された公式archiveの取得だけを実行範囲の外側で行い、固定checksumを確認した。
+
+### 実行した検証・失敗と修正
+
+| 検証 | 結果 |
+|---|---|
+| 既存末尾テストの初回実行 | **12件中1 assertion失敗、2件skip、1.553秒**。初期実装が内部の読み表示を既定でも許可し、従来の拒否条件に違反した。明示的opt-inへ修正し、既存の期待値を維持。`build/auto-mixed/japanese-preferred-first.log` |
+| 修正後の新規・既存対象テスト | **19件中16件成功、3件skip、3 suite、3.036秒**。新規日本語優先・旧かな末尾・旧未完末尾。`build/auto-mixed/japanese-preferred-second.log` |
+| Core全体、native方式 | **144件中139件成功、5件skip、16 suite、7.690秒**。既存manual、v1/v2固定golden、Python数値parity、両版fixture exportと承認済み学習データのexport parityを含む。`build/auto-mixed/japanese-preferred-core.log` |
+| 追加した英文対照テスト | **1件成功、0.355秒**。全体実行の後に追加した `englishSentencesPreserveAmbiguousWordsUsingCurrentRawContext` を単独実行。`I made a note`、`go to the meeting`、`my name is Tom` を英字保持し、単独made/toをかな表示する。全体実行件数には含めない。`build/auto-mixed/japanese-preferred-english-context.log` |
+| 実Zenzai、ホストGPU | **3件成功、skipなし、2.112秒**。新方針と従来のかな末尾・未完末尾を実GGUFで再生し、backend=zenzaiReady。専用プロセスのモデル読込は1回。`build/auto-mixed/japanese-preferred-zenzai.log` |
+| 辞書再現性 | builderの `--check` で派生表・Copyright・provenanceの3点がbyte単位で一致。外部取得物のchecksumとローカル照合の形式・長さ・重複拒否も確認 |
+| Release試用アプリ | build成功 **14.28秒**、.appを更新し、`Core_Core.bundle` の同梱リンクを確認。直接起動して新方針の表示とZenzai読込済みを確認。`build/auto-mixed/japanese-preferred-playground.log` |
+| 静的検査 | `git diff --check` 成功、モデルchecksum不変、通常IMEへの混在入力の生成・dispatchが未接続（機能OFF）であることを確認 |
+
+新規の人工スコア試験は、辞書の一般性別条件、短語、prefix、JSONによる条件変更、維持条件とreset、無関係な編集、保護範囲との交差、Unicode scalar範囲、空入力・上限超過、かな＋未完suffix、原文復元を確認する。人工fixtureは判別性能の根拠にしない。実際のモデルでは `sushi → 寿司`、`made → まで`、`to → と`、既存の `明日 → 明日n → 明日の → 明日のt → 明日のて` を確認した。note/notes/meeting/hello/design/menu/camera/file/tomorrowの英字保持、meetingdesu等の混在、候補選択、原文確定とchild解放も通過した。
+
+実画面では左文脈OFFで `sushi → 寿司`、`made → まで`、`I made a note → I made a note`、入力途中の `mee → meeting` の英字維持、`asitanote → 明日のて`、Escapeによる `asitanote` 復元、`sushi meeting → すし meeting` を確認した。単独sushiと英文を含むrawではモデルスコアが異なり、漢字候補／かな表示が変わることも確認できた。画面には最後の混在例を残した。テスト入力はこのタスクの例文だけで、ユーザーの実際の入力・文脈を収集していない。
+
+全体試験のskip 5件はoffline dataset bridgeと実Zenzai 4件。そのうち新方針・かな末尾・未完末尾の3件だけ別途ホストGPUで実行済み。既存の複数session共有GPU試験とoffline dataset bridgeは今回再実行していない。設定を書き換える `testOptionPunctuationMappings` は従来どおり別途除外した。学習データ・モデルの変更はなく、test splitでの閾値調整は行っていない。
+
+### 制約と次の作業
+
+環境はmacOS 27.0 arm64／Swift 6.4／Xcode 27／Python 3.11.9。native方式の非推奨警告、macOS 13指定とllamaの13.3最低version差などの既存警告は残る。実Zenzai試験は一時領域・学習OFF・ホストGPUで実施した。既知のsandbox GPU制約とLaunchServicesの起動待ち問題は解消扱いにせず、今回も直接起動を使用した。
+
+広範な英語誤変換率、辞書にない語・人名・製品名の評価、実際のtyping trace、入力遅延・RSS、実機IME／他アプリ、署名付きXcode全体build、Linux、SwiftLintは未実行。辞書と表示規則の追加で有限の例は改善したが、実用精度や閾値の最適性は主張しない。日本語を優先する分、ローマ字としても成立する未知の英単語を日本語表示にする場合がある。Escapeで原文を取り戻せる。
+
+適用先は独立した試用アプリで、通常IMEは未接続のため機能OFF、manual／XPC／IMKは未変更。IMEのインストール・削除・登録変更、LaunchAgent・ユーザー設定変更は行っていない。次はT5接続を進められる状態だが、T3品質gate・T6全体の編集安定化・T7評価は未完了のまま。今回の英語維持条件をT6全体の完了とは扱わない。

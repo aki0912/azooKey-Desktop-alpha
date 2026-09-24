@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "commonEntryMaximumJapaneseMean": 0.60,
+  "otherEntryMaximumJapaneseMean": 0.35,
+  "holdMeanAllowance": 0.10,
+  "prefixMaximumJapaneseMean": 0.20,
+  "shortWordMaximumJapaneseMean": 0.15,
+  "minimumRawFraction": 0.50,
+  "minimumPrefixLength": 3
+}

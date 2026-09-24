@@ -33,6 +33,7 @@ import Foundation
     }
 
     public func cancel() {
+        segmenter.reset()
         converter.finishComposition()
         buffer = RawCompositionBuffer()
         spans = []
@@ -98,6 +99,7 @@ import Foundation
                 if state == .composing { try refreshCandidates() }
             } else {
                 let commit = try MixedCommit(text: markedText().text, sourceScalarCount: buffer.offsets.scalarCount)
+                segmenter.reset()
                 converter.finishComposition()
                 buffer = RawCompositionBuffer()
                 spans = []
@@ -146,6 +148,7 @@ import Foundation
         closeSelection()
         usedRawFallback = false
         if buffer.isEmpty {
+            segmenter.reset()
             converter.finishComposition()
             spans = []
             candidates = [:]
@@ -170,6 +173,7 @@ import Foundation
             accepted = accepted.filter { id, _ in spans.contains(where: { $0.id == id }) }
             try refreshCandidates()
         } catch {
+            segmenter.reset()
             converter.finishComposition()
             // Provider failure is reversible and cannot remove the original input.
             spans = [try MixedSpan(sourceRange: ScalarRange(0, buffer.offsets.scalarCount), kind: .unresolved)]

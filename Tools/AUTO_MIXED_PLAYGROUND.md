@@ -16,7 +16,7 @@ sh Tools/run_auto_mixed_playground.sh
 
 `build/auto-mixed/AutoMixedPlayground.app` を生成し、スクリプトから中の実行ファイルを直接起動します。検証MacではLaunchServices経由の起動がライブラリ読込待ちになることがあったため、当面は上記スクリプトを使ってください。開発用アプリはこのcheckout内の資源にリンクしており、アプリだけを別のMacへコピーする配布形式ではありません。
 
-既定の判定器は `build/auto-mixed/independent-thresholds-refined-20260924/export/model.json`。文脈あり0.90／なし0.98の採用閾値、minimum_ja 0.55、margin 1.2をそのまま使います。追加学習や精度調整は行いません。任意のv2モデルと資源フォルダは次のように指定できます。
+既定の判定器は `build/auto-mixed/independent-thresholds-refined-20260924/export/model.json`。モデルの重み・閾値は維持し、試用アプリの表示方針を「日本語優先・英単語判定あり」に変更しました。英単語辞書とモデルの両方に根拠がある区間を原文保持し、それ以外の有効なローマ字は日本語の候補または読みを表示します。英単語判定の試用パラメータは `Core/Sources/Core/InputUtils/AutoMixed/EnglishLexiconResources/english-policy.json` にあり、校正済みの英語確率ではありません。任意のv2モデルと資源フォルダは次のように指定できます。
 
 ```sh
 sh Tools/run_auto_mixed_playground.sh path/to/model.json path/to/resources
@@ -28,8 +28,9 @@ sh Tools/run_auto_mixed_playground.sh path/to/model.json path/to/resources
 
 ## 操作
 
-- 「入力原文」に英数のまま入力します。例は `APIwotukau`。日本語と判定された部分だけ変換します。
-- 末尾が未完ローマ字でも、完成部分が採用基準を満たし、現在の入力全体のスコアも維持基準以上なら、完成部分の候補＋未完文字を表示します。現在のモデルでは `asita` → `明日`、`asitan` → `明日n`、`asitano` → `明日の`。低信頼の入力やURL等には適用せず、途中区間の未完子音も強制変換しません。
+- 「入力原文」に英数のまま入力します。例は `APIwotukau`。判断が曖昧でもローマ字として成立すれば、日本語を優先します。現在のモデルでは `sushi` → `寿司`、単独の `made` → `まで`、`to` → `と` になります。
+- 英単語の完全一致とモデルの根拠を合わせて、`note`、`meeting`、`hello` 等を原文保持します。`mee` のような入力途中は、よく使われる単語のprefixであり、モデルにも強い根拠がある場合だけ英字で残します。英語表示の維持基準は開始基準より少し緩くし、同じ区間の追加入力・末尾削除の揺れを抑えます。
+- 末尾が未完ローマ字でも、日本語の完成部分＋未完文字を表示します。現在のモデルでは `asita` → `明日`、`asitan` → `明日n`、`asitano` → `明日の`。日本語の根拠が弱い場合は漢字候補ではなく読み＋未完文字を使います。URL等は保護し、途中区間の未完子音も強制変換しません。
 - 末尾がかなとして完成し、前半は高信頼でも全体の漢字変換にはまだ確信が足りない場合は、条件を満たした最後の入力単位をひらがなで表示します。例は `asitanot` → `明日のt`、`asitanote` → `明日のて`。この状態の候補選択は前半の漢字候補が対象です。単独の `note` を常に `のて` にする規則ではありません。
 - Spaceは原文の空白として残ります。Enterで下の「確定した文章」につなげます。
 - 「候補 / 次へ」で右端の日本語区間の候補を開きます。候補のボタンかEnterで採用し、もう一度Enterで文章を確定します。
@@ -37,13 +38,15 @@ sh Tools/run_auto_mixed_playground.sh path/to/model.json path/to/resources
 - 左文脈を有効にすると、このウィンドウ内で確定した文章の末尾だけを次の判定に使います。入力中は設定を変えられません。他アプリの文脈を読み取りません。
 - 原文欄は最大256 Unicode scalarです。確定結果はメモリ上の試用欄にだけ追加され、終了時に消えます。
 
-実験段階のモデルなので、`watashiha sushi wotaberu` などを保留し、変換しない場合があります。これは現モデルの挙動です。単語の無条件保留規則や緩い閾値は追加していません。
+同じ綴りでも周囲の入力で判断は変わります。`I made a note` のmadeや、`go to the meeting` のtoは英字を維持します。曖昧語を無条件に保留するリストはありません。辞書だけで任意の部分文字列を英語にしないため、`asitanote` 内のnoteを勝手に切り出しません。未知語や辞書にない製品名、混在境界では誤判定が残り得ます。Escapeで原文へ戻せます。
 
 Tabは、この試用ウィンドウでは通常のフォーカス移動です。IMEのTabによる候補操作、区間移動、OS入力欄への確定、commit ackはT5以降で接続します。中央編集も原文欄の置換として試す段階で、IMKの漢字表示上のカーソル編集を実装したものではありません。
 
 ## 資源と保存範囲
 
-取得先は `.gitmodules` とHEADのgitlinkに一致する以下の2か所です。最新版へ追従しません。
+英単語辞書としてSCOWL 2020.12.07の小規模な派生表（50,957語）を同梱しています。標準的な米英綴りの一部を使い、元の権利表示・取得元・checksum・加工手順を保存しています。詳細は [辞書README](../Core/Sources/Core/InputUtils/AutoMixed/EnglishLexiconResources/README.md) と [Copyright](../Core/Sources/Core/InputUtils/AutoMixed/EnglishLexiconResources/Copyright) を参照してください。辞書の照合はローカルで行い、データを学習へ混ぜません。英語判定の履歴は入力中だけメモリに保持し、確定・取消・空入力・エラーで破棄します。
+
+日本語変換資源の取得先は `.gitmodules` とHEADのgitlinkに一致する以下の2か所です。最新版へ追従しません。
 
 | 資源 | 固定revision | 取得量 |
 |---|---|---|
