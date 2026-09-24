@@ -25,6 +25,8 @@ Swiftによる入力検証には既存Coreの依存解決済み環境が必要�
 
 原本はローカルJSONL。URLからデータを取得する実装はない。資料は現在 `docs/azookey_auto_mixed_codex/docs/04_MODEL_AND_DATA.md` と同ディレクトリの `schemas/` に配置されている。
 
+注釈方法を確認するための [AI作成サンプル50件と人手確認表](review_samples/REVIEW.md) を別に用意した。2026-09-24に利用者が原本50件とローマ字別表記13件の内容を全件採用した。[内容確認記録](review_samples/annotation_review.json) に対象IDとhashを保存している。権利statusはpending_reviewで、fixtureにも権利承認済み学習原本にも含めていない。次は権利・利用条件の確認記録を整える。
+
 | モード | 受け入れるもの | 出力の扱い |
 |---|---|---|
 | fixture | kind=authored_fixture、rights_status=fixture_only、split=fixture | 動作検証専用。途中checkpointからexportまでfixtureを保持 |
@@ -55,9 +57,28 @@ fixtureと実データの混在、pending_review、証拠不足、hash不一致�
 
 原文の共通由来をrawだけで完全には判定できない。注釈者によるgroup_id付与が前提で、近重複検査は補助。初期の人手確認済み小規模データ向けに原本上限は10,000件、近重複検査はO(n²)としている。大規模コーパスへの対応は別途必要。
 
-variantは固定Converterの表から、かなになる母音終端tokenの同じ読みだけを使う。shi/si、chi/ti、tsu/tu等を生成できる。nの特例、撥音境界、促音の残子音、未完入力を独自のPythonローマ字変換で推測しない。これらは原本を保持してvariant生成を省く。生成した変更runはさらに実 `ComposingText.insertAtCursorPosition(_:inputStyle:)` の `.roman2kana` で元runと同じ読みになることを検証する。Zenzai推論・候補学習は呼ばない。
+variantは固定Converterの表で同じかなになる表記だけを使う。初期の増強対象はshi/si、chi/ti、tsu/tu、fu/hu、ji/zi、sha/sya等の拗音、cha/tya/cya・ja/jya/zya等、小書き文字のx/l。この一覧は増強候補を選ぶためのもので、Converterの変換表を置き換えない。実表の読みが一致しない組は生成しない。
+
+元文1件につき、複数のJ区間を代表的な別表記にした例を先に、その後に一部だけ変えた例を作る。既定では最大2件、manifestで0〜8件を指定できる。組み合わせの全列挙はしない。英語・literal・gap・曖昧区間と左文脈、意図表記は保持し、変わった長さに合わせてUnicode scalar offsetを再計算する。
+
+nn/xnは固定表から境界を認識するが置換しない。n・促音の途中子音はそのまま残し、直後の置換で先頭子音が変わる候補を除外する。以前はこれらを含むJ区間全体を省いていたが、現在はほかの完全なtokenの別表記を作れる。アポストロフィ・大文字・未完の末尾を含むJ区間は今回も省く。Pythonでかなへの変換結果を推測せず、生成した変更run全体を実 `ComposingText.insertAtCursorPosition(_:inputStyle:)` の `.roman2kana` で比較する。不一致なら処理全体を失敗させ、正解を変更して通さない。Zenzai推論・候補学習は呼ばない。
+
+初期方式の「固定表にあるすべての同義表記」から、上記の表記群に絞る方式へ変更した。少数の原本にca/ci/whu等の追加例が偏ることを避けるためで、これらの打鍵をConverterから削除したわけではない。生成件数と学習データの内容は変わるため、過去のfixture学習結果との直接比較には使わない。v1/v2特徴量・既存golden・元文ごとの合計sample weight 1は維持する。
 
 prefixはASCII同士の境界に限定し、結合文字・ZWJを切らない。全Unicode書記素のprefix増強は未対応。保護maskは全行について実 `ProtectedSpanDetector` で生成する。依存ライブラリのDEBUG出力が本文を含み得るため、専用Swift検証プロセスでは本文処理中のstdout/stderrを抑止する。入力は一時ファイルに渡し、終了後に削除する。文脈はSwift検証へ渡さない。
+
+### 確認待ちの原本で別表記を確認する
+
+[50件から作成した別表記一覧](review_samples/roman_variants/REVIEW.md) は元文50件＋追加13件の計63件。学習に投入できない `review_preview` として保存した。再生成時は未作成の出力ディレクトリを指定する。
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
+  Tools/AutoMixedTraining/preview_roman_variants.py \
+  --input Tools/AutoMixedTraining/review_samples/samples_50.jsonl \
+  --output build/auto-mixed/new-roman-preview --max-variants 2
+```
+
+この確認用CLIはpending_review・unassignedの原本だけを受け入れ、まず元文groupを仮分割し、その後で別表記を作る。別splitと衝突する派生行は学習経路と同じ関数で除外する。fixtureへの変更や権利承認は行わず、元の50件も書き換えない。出力のpreview.jsonは学習用sealed datasetではない。学習時は、承認済み原本全体を本来のbuild-datasetへ渡して分割・増強し直す。確認用の派生行を原本として連結すると二重増強になるため、投入しない。
 
 ## CLIと各区画の用途
 

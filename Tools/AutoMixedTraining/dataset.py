@@ -129,45 +129,92 @@ def roman_table():
     path = local_file(ROOT, ROMAN_TABLE)
     require(digest(path.read_bytes()) == ROMAN_SHA256, "pinned Converter roman table checksum changed")
     pairs = re.findall(r'^\s*"([a-z]+)": "([\u3041-\u3096]+)",?$', path.read_text(), re.MULTILINE)
-    # Only complete kana-producing, vowel-ending rules. n, apostrophe, doubled consonants,
-    # incremental suffix rules and special mappings are intentionally outside this augmenter.
-    return {key: kana for key, kana in pairs if key[-1] in "aeiou"}
+    # Fixed kana rules also recognize nn/xn boundaries. Incremental suffix rules are not
+    # interpreted here; actual whole-run readings are checked by the Swift bridge.
+    return dict(pairs)
+
+
+# Augmentation choices, not a replacement conversion table: every alias must also have
+# the same kana in the checksum-pinned table. Avoid filling small datasets with rare ci/whu/etc.
+ROMAN_ALIAS_FAMILIES = (
+    ("shi", "si"), ("chi", "ti"), ("tsu", "tu"), ("fu", "hu"), ("ji", "zi"),
+    ("sha", "sya"), ("shu", "syu"), ("she", "sye"), ("sho", "syo"),
+    ("cha", "tya", "cya"), ("chu", "tyu", "cyu"), ("che", "tye", "cye"), ("cho", "tyo", "cyo"),
+    ("ja", "jya", "zya"), ("ju", "jyu", "zyu"), ("je", "jye", "zye"), ("jo", "jyo", "zyo"),
+)
 
 
 def roman_alternatives(raw, table):
+    if not re.fullmatch("[a-z]+", raw):
+        return []
     tokens, cursor = [], 0
     ordered = sorted(table, key=lambda key: (-len(key), key))
     while cursor < len(raw):
         token = next((t for t in ordered if raw.startswith(t, cursor)), None)
         if token is None:
-            return []
-        tokens.append(token)
-        cursor += len(token)
-    variants = []
-    for i, token in enumerate(tokens):
-        for alternative in sorted(t for t in table if t != token and table[t] == table[token]):
-            variants.append("".join(tokens[:i] + [alternative] + tokens[i + 1:]))
-    return sorted(set(variants))
+            # Preserve an unresolved consonant verbatim; do not implement its conversion.
+            tokens.append((raw[cursor], False))
+            cursor += 1
+        else:
+            tokens.append((token, True))
+            cursor += len(token)
+    if not tokens[-1][1]:
+        return []  # Incomplete endings are left to prefix augmentation after splitting.
+    pieces = [token for token, _ in tokens]
+    profile, individual = pieces.copy(), []
+    for i, (token, complete) in enumerate(tokens):
+        if not complete or token[-1] not in "aeiou":
+            continue
+        preferred = next((list(family) for family in ROMAN_ALIAS_FAMILIES if token in family), [])
+        if token.startswith(("x", "l")):
+            preferred = [("l" if token[0] == "x" else "x") + token[1:]]
+        alternatives = [t for t in preferred if t != token and t in table and table[t] == table[token]]
+        if i and not tokens[i - 1][1]:
+            # Changing the first consonant could consume a preserved prefix differently
+            # (sshi -> sci). Keep that boundary stable and still verify in the real engine.
+            alternatives = [t for t in alternatives if t[0] == token[0]]
+        if alternatives:
+            profile[i] = alternatives[0]
+        for alternative in alternatives:
+            candidate = "".join(pieces[:i] + [alternative] + pieces[i + 1:])
+            individual.append(candidate)
+    return list(dict.fromkeys(candidate for candidate in ["".join(profile)] + individual if candidate != raw))
 
 
 def variants(record, table, limit):
-    outputs = []
+    if limit == 0:
+        return []
+    choices = {}
     for i, span in enumerate(record["spans"]):
         if span["label"] != "JA_ROMAN":
             continue
         start, end = span["start"], span["end"]
-        for raw in roman_alternatives(record["raw"][start:end], table):
-            item = copy.deepcopy(record)
-            item["raw"] = record["raw"][:start] + raw + record["raw"][end:]
-            if len(item["raw"]) > 256:
-                continue
-            delta = len(raw) - (end - start)
-            item["spans"][i]["end"] += delta
-            for following in item["spans"][i + 1:]:
-                following["start"] += delta
-                following["end"] += delta
-            outputs.append(item)
-    return outputs[:limit]
+        alternatives = roman_alternatives(record["raw"][start:end], table)
+        if alternatives:
+            choices[i] = alternatives
+    if not choices:
+        return []
+    # One representative clone covers every eligible JA span, then local alternatives.
+    # Never enumerate the Cartesian product of all spelling combinations.
+    replacements = [{i: candidates[0] for i, candidates in choices.items()}]
+    replacements += [{i: candidates[n]} for n in range(max(map(len, choices.values())))
+                     for i, candidates in choices.items() if n < len(candidates)]
+    outputs, seen = [], {record["raw"]}
+    for replacement in replacements:
+        item, chunks, offset = copy.deepcopy(record), [], 0
+        for i, span in enumerate(record["spans"]):
+            chunk = replacement.get(i, record["raw"][span["start"]:span["end"]])
+            chunks.append(chunk)
+            item["spans"][i].update(start=offset, end=offset + len(chunk))
+            offset += len(chunk)
+        item["raw"] = "".join(chunks)
+        if offset > 256 or item["raw"] in seen:
+            continue
+        seen.add(item["raw"])
+        outputs.append(item)
+        if len(outputs) == limit:
+            break
+    return outputs
 
 
 def prefixes(record, seed, limit):
@@ -182,6 +229,15 @@ def prefixes(record, seed, limit):
         item["raw"] = record["raw"][:end]
         item["spans"] = [dict(span, end=min(span["end"], end)) for span in record["spans"] if span["start"] < end]
         yield item
+
+
+def prune_cross_split_augmentations(rows):
+    # Remove derived collisions rather than moving them into a different source split.
+    owners = defaultdict(set)
+    for row in rows:
+        owners[near_key(row["record"]["raw"])].add(row["record"]["split"])
+    return [row for row in rows if row["augmentation"] == "original"
+            or len(owners[near_key(row["record"]["raw"])]) == 1]
 
 
 def build_dataset(manifest_path):
@@ -209,10 +265,7 @@ def build_dataset(manifest_path):
             rows.append(dict(record=item, original_id=record["id"], augmentation=augmentation))
     # Derived text shared by different splits is pruned, never moved to a new split.
     # Originals already share a component. This also removes commonplace short-prefix collisions.
-    owners = defaultdict(set)
-    for row in rows:
-        owners[near_key(row["record"]["raw"])].add(row["record"]["split"])
-    kept = [r for r in rows if r["augmentation"] == "original" or len(owners[near_key(r["record"]["raw"])]) == 1]
+    kept = prune_cross_split_augmentations(rows)
     dropped = len(rows) - len(kept)
     validate_records([r["record"] for r in kept])
     from swift_bridge import validate_in_swift

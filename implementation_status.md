@@ -391,3 +391,77 @@ SwiftPMの既定ビルド方式でのllama署名問題は未解決で、native�
 [学習手順](Tools/AutoMixedTraining/TRAINING.md) の承認manifestに、責任者が確認した実データと確認記録を指定すれば、fixtureと別の経路で準備を開始できる。少数fixtureのfit結果を本番モデルへ流用しない。十分な元文group、校正用の両class、独立testを揃え、注釈・権利・近重複を確認する必要がある。
 
 次は実コーパスの用意とレビュー、その後の学習・校正・独立評価・失敗例分析。同条件のv1/v2比較とT4以降の統合が揃うまでT3完了や判別性能を宣言しない。機能OFFを維持し、通常使用中のIMEのインストール・削除・登録変更は行っていない。
+
+## T3データ準備：人手確認用のAI作成サンプル50件（2026-09-24）
+
+開始HEADは `1fff8acc5dedd96be8eb612075c9781a04cc982d`、作業ツリーはクリーン。依頼に沿って `Tools/AutoMixedTraining/review_samples/samples_50.jsonl` と [確認表](Tools/AutoMixedTraining/review_samples/REVIEW.md) を追加した。学習ツール・Core・アプリ・既存fixture・golden・schema・期待値は変更していない。
+
+50件は日英混在16件、日本語7件、通常の英文6件、保護文字列4件、Unicodeを含む3件、文脈対照・取得不可・空文脈13件、日本語文脈中の英語1件。全件がAI作成の注釈案で、人手の確認結果やモデルの予測ではない。読み候補・意図表記・確認点を記載した。外部コーパスの取得、第三者の入力履歴の収集はしていない。文脈は自作の設定だけで、Swift検証へは渡していない。
+
+`kind=authored` は未承認の作成原稿という扱いで、AIによる生成であることを各行のnoteと確認表に明記した。`rights_status=pending_review`、`split=unassigned` を維持し、承認manifestは作成していない。生成サービスの用途適合性・権利・プライバシーの人手確認は未実施。同梱fixtureから分離し、fixtureや本番モデルを作る経路へ混ぜていない。
+
+同じrawの文脈対照と関連する英文は同じgroupへまとめ、全36 groupとした。035〜047のrawは既存fixtureと重複するため、既存fixtureから独立したtestには使えない旨を記載した。分割・ローマ字variant・prefix増強は未実施。後続で承認済み原本をgroup単位で分割してから増強する。
+
+### 検証結果と修正
+
+実行環境は既存のmacOS arm64、隔離Python 3.11.9環境と依存lock、固定Converter revision `ad714fea8cb2fe113aea86ba5c42563cdaf77cfb`。検証ログは `build/auto-mixed/review-samples-50/` に保存した。
+
+| 検証 | 結果 |
+|---|---|
+| 原本の構造・範囲 | 50件を検査。既存原本専用拡張unassignedを検査用メモリ上のコピーでのみtrainに置換し、既存schema・連続被覆・scalar範囲・ID・文脈契約のvalidatorを通過。実際のsplit割当や権利承認ではない |
+| group・文脈・Unicode | 同一rawのgroup一致、36 group、取得不可4対照と取得成功した空文脈の区別、絵文字の3 scalar・分解形アクセントの保持を確認 |
+| 固定Converterとの読み照合・初回 | 既存 `AutoMixedTrainingBridgeTests` にJ区間のrawと期待かなを渡したところromanMismatchで失敗。切り分けで020・021・029・049の4件を特定 |
+| 読み不一致への対応 | 期待かなは変更せず、020をsatsukisannniaimashita、021をkonnnyakuwokaimasu、029のJ区間をwokakuninn、049をhonnyakusuruへ修正。固定表のnn・ny・終端nの扱いに合わせた。初稿との差を確認表へ記載 |
+| 修正後の実Swift検証 | 46 J区間すべてでrawのconvertTargetと期待かなが一致、全50行の保護mask生成も完了。専用bridgeテスト1件通過。かなを比較対象にした一括入力検証であり、漢字や言語判定の性能試験ではない |
+| 未承認データの拒否 | CLIの直接入力はfixture schemaと不一致で拒否。チェック用の一時pending manifestではapproval/privacy review requiredで拒否。いずれも期待した非ゼロ終了で、本番学習は未実行 |
+| 最終整合性 | JSONLと確認表の50 ID・全区間が一致し、全行未確認のままであることを確認。新規ファイルの末尾空白検査とgit diff --checkも通過 |
+| 文書lint | natural-japaneseのlintはsudachipy不足で失敗。確認手順と表を手動で通読。追加の依存ダウンロードは行っていない |
+
+SwiftPMは既存と同じnative方式を使用。user-level cacheへの書込不可とnative方式廃止予定の警告が出たが、修正後の専用テストは成功した。アプリコード変更がないためCore全体・実GUI・IME打鍵試験は再実行していない。人手による例文・読み・意図・権利の確認、学習・校正・独立評価は未実行。自動混在入力はOFFのままで、通常使用中のIMEのインストール・削除・登録変更は行っていない。
+
+次は確認表の全50行を採用・修正・判断不可・除外に分け、特に固有名詞・日付・助詞、曖昧語と左文脈、保護する範囲を確認する。表の修正をJSONLへ反映して再検証した後、権利と注釈が確認済みの原本を増やす。この50件の作成や読み一致をもってT3完了・判別精度の達成とはしない。
+
+## T3データ準備：ローマ字の別表記を増強（2026-09-24）
+
+HEADは引き続き `1fff8acc5dedd96be8eb612075c9781a04cc982d`。開始時に残っていた50件の原本・確認表・TRAINING.md・本記録の変更を保持した。固定Converterは既にshi/si・tsu/tu等を受理しており、今回の対象は学習データの増強。Converter本体、既存manual入力、アプリ、v1/v2特徴量・LR・Viterbi・golden・schemaは変更していない。
+
+### 増強方式と理由
+
+`dataset.py` の候補生成を拡張した。以前は完全な母音終端tokenだけで分解できないJ区間を丸ごと省いていたため、wohozonshiteやsatsukisannniaimashita中のshi/tsuも取りこぼしていた。現在は固定表のnn/xnを境界として認識し、未解釈の途中子音をそのまま保つ。途中子音の直後で置換先の先頭子音が変わる候補は省く。生成後は従来と同じ実Swiftの厳密な読み比較を必須とし、不一致を無視する経路は追加していない。
+
+置換はJA_ROMAN区間のみ。shi/si、chi/ti、tsu/tu、fu/hu、ji/zi、拗音・小書きx/lの代表的な表記群を候補にし、実際に固定表で同じかなになるものだけを使う。複数の区間・箇所を変えた代表例を先に、その後に一部だけ変えた例を作る。既定は元文あたり最大2件、設定上限は既存どおり8件。組み合わせの全列挙を避け、重複と256 scalar超過を除く。英語・literal・gap・曖昧区間、文脈、意図表記、group・split・provenanceは保持し、offsetを再計算する。
+
+仕様の具体化として、固定表にある全同義キーを採用する従来方式から、代表的な表記群に限定した。少数データへca/ci/whu等の例が偏ることを避けるためで、実用頻度を測定した結果ではない。これらの入力をConverterから削除したわけでもない。増強データと選択順は変わるため、旧fixture学習結果との直接比較は行わない。表記別の実データ量・精度は今後検証する。アポストロフィ、大文字、未完末尾のJ区間は引き続き省く。
+
+元文groupを分割してから増強し、派生行はsplitを継承する。別splitと衝突した派生行を除く処理は共通関数へ切り出し、確認用プレビューでも同じ処理を使う。元文ごとの合計sample weight 1、train限定の語彙、dev/calibration/testの役割は変更していない。
+
+### 50件への適用結果と確認方法
+
+`preview_roman_variants.py` を追加し、pending_review・unassignedの原本からだけ確認用プレビューを作れるようにした。groupを仮分割してから生成し、実Swift検証に通った後に、新規ディレクトリへpreview.jsonと確認表を保存する。本文・左文脈を診断ログへ出さず、文脈はSwiftへ渡さない。出力済みディレクトリは上書きしない。
+
+[派生一覧](Tools/AutoMixedTraining/review_samples/roman_variants/REVIEW.md) は元の50件＋別表記13件の計63件、cross-split衝突除外は0件。全件pending_reviewを維持した。原本JSONLは変更していない。preview.jsonは `kind=review_preview`、`training_eligible=false` であり、学習用sealed datasetとして受け入れられない。仮分割を本番の分割と見なさず、学習時は承認済み原本全体から再構築する。プレビューを原本へ連結して二重増強しない。
+
+### 検証結果・制約
+
+| 検証 | 結果 |
+|---|---|
+| 50件の増強プレビュー | 実Converterで13派生行の変更区間が元区間と同じ読みになることを確認。63行の保護mask、schema・scalar範囲、原本hash・preview checksum、group継承を検証 |
+| Python最終回帰 | **25件すべて通過、skipなし**。別表記の双方向性、複数箇所の代表例、n・促音、Unicode offset、非J区間と文脈の保持、件数制限、split前生成の防止、漏洩除外、未承認・既存出力の拒否、元文重みを検証。`roman-augmentation-tests-final.log` |
+| 別表記群の実Swift照合 | 78入力ケースから作った**106派生ペア**が実Converterで同じ読みになることを確認。小書きx/l、拗音、n・促音を含む。既存の厳密比較を使用し、期待値・誤差許容は変更なし |
+| fixture全CLI smoke | validate-data、build-dataset、v1/v2のtrain・calibrate・export・evaluateが通過。55原本＋10 variant＋232 prefix＝297行、別splitと衝突した派生55行を除外。全出力はfixture、release_ready=false。`build/auto-mixed/roman-augmentation-smoke/` |
+| Swift parityを含むpure Core | **41件／9 suite通過**。既存v1/v2 golden、fit済みfixtureの数値・decoder・保護／保留の一致を維持。`roman-augmentation-smoke/swift-parity.log` |
+| 文書lint | natural-japaneseのlintを試行したがsudachipy不足で失敗。追加部分と確認表を手動で通読。依存追加や外部データ取得は行っていない |
+
+学習・増強に関する検証の失敗はなかった。最初のPython実行ではfit用の3件を専用環境変数なしでskipしたが、最終実行では新しいSwift照合を含め全25件を実行した。テスト用の出力上書き拒否は期待どおりのエラーである。
+
+Swiftは既存のnative方式を使用し、既定方式の署名問題は未解決。通常使用中のIME、アプリ設定、辞書、登録は変更していない。実入力欄、キーイベントの逐次入力、実Zenzai、本番コーパスでの学習・校正・独立評価、実用頻度や品質向上の測定は未実行。自動混在入力はOFF、T3全体は未完了。次は元の50件と派生13件の人手確認、権利承認、その後の確認済み原本の拡充となる。
+
+## サンプル63件の内容確認完了（2026-09-24）
+
+利用者から「サンプルデータは全件オッケーです。」という返答を受け、原本50件とローマ字別表記13件を全件採用として記録した。確認表の判定を更新し、`Tools/AutoMixedTraining/review_samples/annotation_review.json` に確認者（この会話の利用者）、日付、返答、対象ID、対象ファイルのSHA-256を保存した。個別の修正指示はなかったため、raw・ラベル・読み候補・文脈・group・splitを含む原本JSONLとpreview.jsonの内容は変更していない。
+
+AMBIGUOUSの5件は、意図を固定しない評価用例として採用した。JA/RAWへ強制変更せず、binary学習から除外する契約を維持する。原本noteは作成時の記録として残し、現在の内容確認状態はhash付きの確認記録を正とする。将来内容を変えた場合に、今回の採用を自動継承しない。
+
+今回の返答は内容・注釈の確認として記録し、生成サービスの利用条件や権利確認の証拠を補ったことにはしない。provenanceのrights_statusはpending_review、previewのtraining_eligibleはfalseを維持した。学習用の権利確認manifestは未作成で、次は利用条件と許可用途の記録を整える。学習・校正・品質評価、IMEの変更は実行していない。
+
+確認記録の63 ID、2ファイルのSHA-256、確認表の50＋13件の採用判定、preview checksum、AMBIGUOUS 5件と権利statusの維持を検証し、git diff --checkも通過した。データ本文・実行コードの変更はないため、モデル学習やCoreテストは再実行していない。文書lintはsudachipy不足で失敗し、更新箇所は手動で通読した。
