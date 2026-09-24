@@ -37,6 +37,7 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         let scores = try protection.enumerated().map { index, kind in
             kind == .inferred ? try model.score(features, at: index).japaneseProbability : 0.5
         }
+        var scoresWithoutContext: [Double]?
         var nextEnglish: [EnglishRegion] = []
         var result: [MixedSpan] = []
         var start = 0
@@ -54,8 +55,25 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                     guard lower < upper else { return nil }
                     return try MixedSpan(sourceRange: ScalarRange(lower, upper), kind: span.kind)
                 }
-                if isEnglish(word, range: range, scores: scores, atEnd: end == source.scalarCount,
-                             unchangedPrefixCount: unchangedPrefixCount) {
+                var english = isEnglish(word, range: range, scores: scores, atEnd: end == source.scalarCount,
+                                        unchangedPrefixCount: unchangedPrefixCount)
+                // A committed Japanese context can overwhelm the current spelling. For a
+                // whole dictionary word (or permitted terminal prefix) that cannot yet form
+                // complete Japanese, require the same English gates on current raw evidence.
+                // Complete roman words such as made/name/note still use contextual judgment.
+                if !english, context.isAvailable, word.utf8.count >= policy.minimumPrefixLength,
+                   lexicon.exactLevel(word) != nil || (end == source.scalarCount && lexicon.prefixLevel(word) != nil),
+                   RomanSpanReading.parse(word)?.suffix.isEmpty != true {
+                    if scoresWithoutContext == nil {
+                        let independent = ContextualCharacterFeatures(raw, leftContext: .unavailable)
+                        scoresWithoutContext = try protection.enumerated().map { index, kind in
+                            kind == .inferred ? try model.score(independent, at: index).japaneseProbability : 0.5
+                        }
+                    }
+                    english = isEnglish(word, range: range, scores: scoresWithoutContext!,
+                                        atEnd: end == source.scalarCount, unchangedPrefixCount: unchangedPrefixCount)
+                }
+                if english {
                     result.append(MixedSpan(sourceRange: range, kind: .raw))
                     nextEnglish.append(EnglishRegion(range: range, raw: word))
                 } else if let split = try embeddedEnglishSplit(inherited, in: range, source: source, scores: scores,

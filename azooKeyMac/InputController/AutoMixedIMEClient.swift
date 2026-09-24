@@ -13,6 +13,7 @@ extension ConverterServerClient: AutoMixedCommandSending {}
     private let server: any AutoMixedCommandSending
     private let experimentEnabled: () -> Bool
     private let render: (ConverterServerResponse) -> Void
+    private let diagnosticID: UUID
     private var ledger = AutoMixedClientLedger()
     private var operationID: UInt64 = 0
     private var startsFocus = true
@@ -30,10 +31,11 @@ extension ConverterServerClient: AutoMixedCommandSending {}
     init(server: any AutoMixedCommandSending, experimentEnabled: @escaping () -> Bool = {
         guard let resources = Bundle.main.resourceURL else { return false }
         return AutoMixedExperiment.configuration(in: resources) != nil
-    }, render: @escaping (ConverterServerResponse) -> Void) {
+    }, diagnosticID: UUID = UUID(), render: @escaping (ConverterServerResponse) -> Void) {
         self.server = server
         self.experimentEnabled = experimentEnabled
         self.render = render
+        self.diagnosticID = diagnosticID
     }
 
     func activate(client: IMKTextInput, canEnable: @escaping () -> Bool) {
@@ -48,7 +50,10 @@ extension ConverterServerClient: AutoMixedCommandSending {}
         startsFocus = true
         lastMixed = nil
         lastDisplayed = ""
-        guard requestedPolicy == .automaticMixed, experimentEnabled() else { return }
+        let enabled = requestedPolicy == .automaticMixed && experimentEnabled()
+        MixedDiagnostics.record(.capabilityStart, [.owner: .id(diagnosticID), .experiment: .flag(enabled),
+            .allowed: .flag(requestedPolicy == .automaticMixed)])
+        guard requestedPolicy == .automaticMixed, enabled else { return }
         negotiating = true
         // This command is understood by old servers; no new enum case before negotiation.
         server.send({ _ in .composition(.snapshot) }, timeout: 5) { [weak self] response in
@@ -57,7 +62,10 @@ extension ConverterServerClient: AutoMixedCommandSending {}
             let keys = self.bufferedKeys
             self.bufferedKeys = []
             self.negotiating = false
-            guard canEnable() else {
+            let allowed = canEnable()
+            MixedDiagnostics.record(.capabilityReply, [.owner: .id(self.diagnosticID), .allowed: .flag(allowed),
+                .success: .flag(response != nil), .capability: .flag(response?.autoMixedCapability != nil)])
+            guard allowed else {
                 self.recoverNegotiation(raw: raw)
                 return
             }
@@ -79,11 +87,19 @@ extension ConverterServerClient: AutoMixedCommandSending {}
     func handle(_ event: KeyEventCore, client: IMKTextInput, inputStyle: ConverterInputStyle,
                 context: () -> ConverterTextContext) -> Bool? {
         guard isActive else { return nil }
-        guard origin === (client as AnyObject) else { deactivate(); return nil }
-        if event.keyCode == 102 || event.keyCode == 104 || inputStyle != .defaultRomanToKana {
+        guard origin === (client as AnyObject) else {
+            MixedDiagnostics.record(.clientMismatch, [.owner: .id(diagnosticID), .sameClient: .flag(false)])
+            deactivate(); return nil
+        }
+        if event.keyCode == 102 || inputStyle != .defaultRomanToKana {
+            MixedDiagnostics.record(.manualExit, [.owner: .id(diagnosticID),
+                .reason: .token(event.keyCode == 102 ? .romanKey : .unsupportedInputStyle)])
             leaveForManual()
             return nil
         }
+        // Kana reaffirms Japanese-priority automatic input. Sending it to the manual
+        // converter would switch the controller to Japanese and bypass segmentation.
+        if event.keyCode == 104 { return true }
         guard AutoMixedKeyRouter.owns(event, composing: !(lastMixed?.raw.isEmpty ?? true), pending: pending > 0 || !bufferedKeys.isEmpty) else { return false }
         if negotiating {
             bufferedKeys.append((event, context()))
@@ -131,6 +147,7 @@ extension ConverterServerClient: AutoMixedCommandSending {}
     }
 
     func deactivate() {
+        MixedDiagnostics.record(.clientDeactivate, [.owner: .id(diagnosticID), .active: .flag(isActive), .pending: .number(pending)])
         if ledger.capability != nil { send(.deactivate) }
         active = false
         negotiating = false
@@ -153,7 +170,19 @@ extension ConverterServerClient: AutoMixedCommandSending {}
         let generation = activation
         // A cold GGUF/Metal initialization can exceed the legacy one-second timeout.
         server.send({ _ in .autoMixed(request) }, timeout: 5) { [weak self] response in
-            guard let self, self.activation == generation, let client = self.origin as? IMKTextInput else { return }
+            guard let self else { return }
+            guard self.activation == generation, let client = self.origin as? IMKTextInput else {
+                MixedDiagnostics.record(.staleReply, [.owner: .id(self.diagnosticID)])
+                return
+            }
+            var diagnostic: [MixedDiagnostics.Field: MixedDiagnostics.Value] = [
+                .owner: .id(self.diagnosticID), .operation: .number(Int(clamping: request.operationID)),
+                .success: .flag(response != nil), .active: .flag(response?.autoMixed != nil)]
+            if let mixed = response?.autoMixed {
+                diagnostic[.accepted] = .flag(self.ledger.accepts(mixed))
+                diagnostic[.status] = .status(mixed.status)
+            }
+            MixedDiagnostics.record(.clientReply, diagnostic)
             self.pending = max(0, self.pending - 1)
             guard let response, let mixed = response.autoMixed,
                   self.ledger.accepts(mixed), mixed.status != .restartRequired,

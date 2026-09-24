@@ -122,6 +122,18 @@ import Testing
         #expect(preferred.retainedEnglishRegionCount == 0)
     }
 
+    @Test func contextFallbackStillRequiresCurrentRawEnglishEvidence() throws {
+        // Artificial high JA scores exist even without context: dictionary membership
+        // alone must not bypass the existing English gate or create substring matches.
+        let preferred = try JapanesePreferredSegmenter(model: fixture(0.99),
+            lexicon: EnglishLexicon(data: Data("apple\t10\napplication\t10\n".utf8)),
+            policy: .bundled(), context: .available("明日"), focus: UUID())
+        for raw in ["app", "appl", "apple", "asitaapple"] {
+            preferred.reset()
+            #expect(try !preferred.segment(raw).contains { $0.kind == .raw })
+        }
+    }
+
     @Test func protectedAndUnicodeRangesStayCoveredAndReadingSuffixIsReversible() throws {
         let preferred = try segmenter(fixture(0.1))
         for raw in ["APIxyz", "APIasita", "👩‍💻 e\u{301} sushi note", "asita  https://example.com", "", "asita_n"] {

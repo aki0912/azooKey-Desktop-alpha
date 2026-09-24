@@ -56,14 +56,22 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
         // キー入力の応答はユーザー操作のクリティカルパスなので、システム負荷が高い時も
         // utility/background work より先に実行される優先度で Server actor へ渡す。
         Task(priority: .userInitiated) { @MainActor in
+            var diagnostic: [MixedDiagnostics.Field: MixedDiagnostics.Value] = [:]
             do {
                 let command = try ConverterServerCodec.decodeCommand(from: data)
+                diagnostic = MixedDiagnostics.fields(for: command)
+                MixedDiagnostics.record(.serverReceive, diagnostic)
                 let response = try await self.handle(command)
+                diagnostic[.capability] = .flag(response.autoMixedCapability != nil)
+                diagnostic[.active] = .flag(response.autoMixed != nil)
+                if let status = response.autoMixed?.status { diagnostic[.status] = .status(status) }
+                MixedDiagnostics.record(.serverReply, diagnostic)
                 self.learningDataCommitScheduler.postponeIfScheduled(
                     after: Self.learningDataCommitDelay
                 )
                 reply(try ConverterServerCodec.encode(response), nil)
             } catch {
+                MixedDiagnostics.record(.serverFailure, diagnostic)
                 self.learningDataCommitScheduler.postponeIfScheduled(
                     after: Self.learningDataCommitDelay
                 )
@@ -169,9 +177,12 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
     private func automaticMixedRuntime() -> AutoMixedRuntime? {
         if !attemptedMixedRuntime {
             attemptedMixedRuntime = true
-            guard AutoMixedExperiment.configuration(in: Self.appResourcesDirectoryURL()) != nil else { return nil }
+            let enabled = AutoMixedExperiment.configuration(in: Self.appResourcesDirectoryURL()) != nil
+            MixedDiagnostics.record(.runtimeStage, [.stage: .token(.marker), .experiment: .flag(enabled)])
+            guard enabled else { return nil }
             mixedRuntime = try? AutoMixedRuntime(resources: Self.appResourcesDirectoryURL(),
                 converter: kanaKanjiConverter, applicationDirectory: AppGroup.memoryDirectoryURL())
+            MixedDiagnostics.record(.runtimeStage, [.stage: .token(.ready), .success: .flag(mixedRuntime != nil)])
         }
         return mixedRuntime
     }

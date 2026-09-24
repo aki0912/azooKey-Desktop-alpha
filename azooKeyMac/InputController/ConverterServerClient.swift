@@ -14,6 +14,7 @@ private enum ConverterServerXPC {
 
 @MainActor
 final class ConverterServerClient {
+    let diagnosticID = UUID()
     private static let commandTimeout: TimeInterval = 1
 
     private var connection: NSXPCConnection?
@@ -239,10 +240,14 @@ final class ConverterServerClient {
         _ command: ConverterServerCommand,
         completion: @escaping (ConverterServerResponse?) -> Void
     ) {
+        var diagnostic = MixedDiagnostics.fields(for: command)
+        diagnostic[.owner] = .id(diagnosticID)
+        MixedDiagnostics.record(.xpcSend, diagnostic)
         do {
             let data = try ConverterServerCodec.encode(command)
             self.remoteObjectProxy { proxy in
                 guard let proxy else {
+                    MixedDiagnostics.record(.xpcFailure, diagnostic.merging([.reason: .token(.proxy)]) { _, new in new })
                     completion(nil)
                     return
                 }
@@ -250,6 +255,7 @@ final class ConverterServerClient {
                     let errorDescription = errorMessage.map(String.init)
                     DispatchQueue.main.async {
                         if let errorDescription {
+                            MixedDiagnostics.record(.xpcFailure, diagnostic.merging([.reason: .token(.server)]) { _, new in new })
                             self?.onLog?("ConverterServer command failed: \(errorDescription)")
                             if errorDescription.hasPrefix("Unknown converter session:") {
                                 self?.resetConnection(preservingSession: false)
@@ -258,14 +264,21 @@ final class ConverterServerClient {
                             return
                         }
                         guard let responseData else {
+                            MixedDiagnostics.record(.xpcFailure, diagnostic.merging([.reason: .token(.missingReply)]) { _, new in new })
                             completion(nil)
                             return
                         }
-                        completion(try? ConverterServerCodec.decodeResponse(from: responseData))
+                        let response = try? ConverterServerCodec.decodeResponse(from: responseData)
+                        MixedDiagnostics.record(.xpcReply, diagnostic.merging([
+                            .success: .flag(response != nil), .capability: .flag(response?.autoMixedCapability != nil),
+                            .active: .flag(response?.autoMixed != nil)
+                        ]) { _, new in new })
+                        completion(response)
                     }
                 }
             }
         } catch {
+            MixedDiagnostics.record(.xpcFailure, diagnostic.merging([.reason: .token(.encode)]) { _, new in new })
             self.onLog?("ConverterServer encode failed: \(error.localizedDescription)")
             completion(nil)
         }
@@ -279,12 +292,14 @@ final class ConverterServerClient {
         connection.remoteObjectInterface = NSXPCInterface(with: ConverterServerXPCProtocol.self)
         connection.interruptionHandler = { [weak self] in
             DispatchQueue.main.async {
+                if let self { MixedDiagnostics.record(.xpcInterrupted, [.owner: .id(self.diagnosticID)]) }
                 self?.onLog?("ConverterServer connection interrupted")
                 self?.resetConnection(preservingSession: true)
             }
         }
         connection.invalidationHandler = { [weak self] in
             DispatchQueue.main.async {
+                if let self { MixedDiagnostics.record(.xpcInvalidated, [.owner: .id(self.diagnosticID)]) }
                 self?.onLog?("ConverterServer connection invalidated")
                 self?.resetConnection(preservingSession: true)
             }
@@ -326,6 +341,7 @@ final class ConverterServerClient {
     }
 
     private func handleCommandTimeout() {
+        MixedDiagnostics.record(.xpcTimeout, [.owner: .id(diagnosticID)])
         onLog?("ConverterServer command timed out")
         recordReconnectFailure()
         resetConnection(preservingSession: true)

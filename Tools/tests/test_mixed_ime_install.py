@@ -31,6 +31,7 @@ class Runner:
     def __init__(self, failure=None):
         self.calls = []
         self.failure = failure
+        self.service_loaded = False
 
     def __call__(self, args, **kwargs):
         args = list(map(str, args))
@@ -40,6 +41,12 @@ class Runner:
             raise subprocess.CalledProcessError(1, args)
         if args[0] == "ditto":
             shutil.copytree(args[1], args[2])
+        if args[:2] == ["launchctl", "bootout"]:
+            self.service_loaded = False
+        if args[:2] == ["launchctl", "bootstrap"]:
+            self.service_loaded = True
+        if args[:2] == ["launchctl", "print"] and not self.service_loaded:
+            raise subprocess.CalledProcessError(113, args)
         identity = {"bundleIdentifier": BUNDLE, "machServiceName": module.SERVICE,
                     "preferencesIdentifier": BUNDLE + ".preferences", "keychainAccount": BUNDLE + ".preference.OpenAiApiKey",
                     "dataScope": "isolated-local"}
@@ -83,6 +90,18 @@ class InstallTests(unittest.TestCase):
         self.assertFalse(self.installer.app.exists())
         self.assertFalse(self.installer.agent.exists())
 
+    def test_update_preserves_input_source_registration_and_enabled_modes(self):
+        self.installer.install(self.source)
+        self.runner.calls.clear()
+        self.installer.install(self.source, update_only=True)
+        self.assertEqual((self.installer.app / "payload").read_text(), "new")
+        self.assertFalse(any("register" in args or "disable" in args or "select" in args for args in self.runner.calls))
+
+    def test_update_cannot_be_used_for_first_install(self):
+        with self.assertRaises(ValueError): self.installer.install(self.source, update_only=True)
+        self.assertFalse(self.installer.app.exists())
+        self.assertFalse(any(args[0] in {"ditto", "launchctl", "MixedIMEControl"} for args in self.runner.calls))
+
     def test_copy_failure_does_not_remove_existing_app_or_stop_service(self):
         make_app(self.installer.app, "old")
         self.runner.failure = "ditto"
@@ -121,6 +140,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual((self.installer.app / "payload").read_text(), "new")
 
     def test_bootstrap_error_does_not_retry_over_a_live_job(self):
+        self.runner.service_loaded = True
         attempts = []
         def running(args, **kwargs):
             if args[0:2] == ["launchctl", "bootstrap"]:
@@ -130,6 +150,32 @@ class InstallTests(unittest.TestCase):
         self.installer.run = running
         with self.assertRaises(subprocess.CalledProcessError): self.installer.start_server()
         self.assertEqual(len(attempts), 1)
+
+    def test_update_waits_for_departing_job_before_replacing_files(self):
+        self.installer.install(self.source)
+        (self.installer.app / "payload").write_text("old")
+        remaining = 0
+        observed = []
+        def departing(args, **kwargs):
+            nonlocal remaining
+            if args[:2] == ["launchctl", "bootout"]:
+                remaining = 2
+            if args[:2] == ["launchctl", "print"] and remaining:
+                remaining -= 1
+                observed.append((self.installer.app / "payload").read_text())
+                return subprocess.CompletedProcess(args, 0)
+            return self.runner(args, **kwargs)
+        self.installer.run = departing
+        with patch.object(module.time, "sleep"):
+            self.installer.install(self.source, update_only=True)
+        self.assertEqual(observed, ["old", "old"])
+        self.assertEqual((self.installer.app / "payload").read_text(), "new")
+
+    def test_stop_timeout_is_bounded(self):
+        self.installer.run = lambda args, **kwargs: subprocess.CompletedProcess(args, 0)
+        with patch.object(module.time, "sleep") as sleep:
+            with self.assertRaises(TimeoutError): self.installer.stop_server()
+        self.assertEqual(sleep.call_count, 80)
 
     def test_wrong_identity_or_agent_is_not_overwritten(self):
         make_app(self.installer.app, "unknown")

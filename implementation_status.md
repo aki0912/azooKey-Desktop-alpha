@@ -1,6 +1,6 @@
 # Auto Mixed Input 実装状況
 
-2026-09-24時点。**T0〜T2と実ZenzaiのT4は検証済み。通常版と分離した3モードのazooKey Mixedをビルド・ローカル署名・インストールし、専用Mach XPCで実変換を確認した。ただしmacOSの親入力ソースが有効にならず、IMEとしての打鍵確認は未実行。再ログイン後の有効化確認が必要。通常ビルドの自動混在入力はOFF。** 最新記録は末尾の「通常版と併用するazooKey Mixed」を参照。
+2026-09-24時点。**「明日あっpぇ」の原因は、かなキーで自動モードを終了して手動日本語へ送る処理だった。修正版を反映し、利用者が「明日apple」になることを確認。更新後のログでもかなキーを自動経路で消費し、以後の文字を自動サーバーへ配送して正常応答を受理することを確認した。原因でなかった初期モード補完は撤去済み。今回の再現手順は解消確認済みだが、広範なアプリ互換性・長時間試験は未完了。** 最新記録は末尾の「かなキーによる自動モード解除の特定と修正」を参照。
 
 計700原文（増強後3,907行）でv1/v2のLR学習・校正・exportは実施済みだが、品質基準未達のためT3全体は未完了、候補モデルはrelease_ready=false。追加650件の人手確認も未実施。fixtureと候補モデルのPython／Swift数値一致を確認したことと、実入力での判別性能・v2の優位性を区別する。T6全体・T7/T8は未完了。以下の各stageは当時の資料パス・実行結果を含む履歴である。
 
@@ -1008,3 +1008,179 @@ Coreのskip1件はoffline dataset builder専用試験。ユーザー設定を書
 T3品質gate・追加650件の人手確認、T6中央編集、T7精度／遅延／RSS／ログ監査、T8正式配布の署名・権利表示は引き続き未完了。導入・更新・削除と未対応点は `Tools/AUTO_MIXED_IME.md`。今回の差分は未コミット。
 
 最終静的確認：`git diff --check` 成功、モデルchecksum不変、source resourcesの実験マーカー・一時リンクなし、lock/依存manifest不変。最終導入dry-runもstrict署名・identity検査に成功した（`mixed-final-dry-run.log`）。登録状態は `mixed-registration-final.json`、選択中IDの前後比較は一致。クライアント8件は0.006秒、導入試験9件は0.037秒で再実行成功した。
+
+
+## 日本語確定後のapple入力（2026-09-24）
+
+利用者の「自動モードでappleが日本語に変換される」という報告を調査した。開始HEADは `fa73fcc1cd4289671d9f7279012b97cf10242549`、git statusはclean。会話のAGENTS指示、implementation_status、現行README・04/06章・IME手順を確認。前回の隔離導入がコミット済みであることを確認した。通常IMEとmanual経路、モデル・辞書・依存・学習データは変更していない。
+
+### 再現した原因と修正範囲
+
+短い確定済み左文脈があると、v2モデルが現在の英単語の綴りまで日本語寄りにする。人工の対照例で、`apple` のpJAは文脈なしで約0.002〜0.081、左文脈「明日」で約0.956〜0.999となった。これは表示する英語確率ではない。文脈を取得できた空文字列でも強く日本語寄りになるケースがあった。
+
+現在の導入済みhelperへ専用試験sessionで「asita確定 → ack → appleを1文字ずつ」を送ると、`app` 時点の表示が英字のままにならず、英字spanの判定も外れることを実Mach XPCで再現した。今回確認した「明日」文脈では、完成した `apple` はunresolvedとして原文表示に戻る。この結果と、利用者の環境で完成語が日本語化する全ケースを同一視しない。実IMK欄での症状全体の再現は未実行。
+
+`JapanesePreferredSegmenter` に次の狭い補助判定を追加した。
+
+- 文脈付きの英語条件に届かず、文脈が取得できている場合だけ使う。
+- 対象は保護後の区間全体で、辞書完全一致または入力末尾の辞書prefix、3文字以上に限る。任意substringを探さない。
+- 標準ローマ字として未完／不成立の場合だけ、同じraw全体を文脈なしでも採点する。既存の英語平均値・RAW比率・level・prefix・hold条件を満たすことを要求する。
+- `made/name/note/no/to` など完成したローマ字にはこの補助判定を使わない。辞書にあるだけで無条件に英語にしない。現在rawだけでも日本語の根拠が強ければ採用しない。
+- 追加採点は1回のsegment呼出しにつき最大1回。文脈や入力を保存する処理は追加しない。
+
+これにより修正後は `app → appl → apple` の順方向・削除・再入力と、日本語確定後の繰返しで英字を保持した。1〜2文字段階の日本語優先は維持する。これはモデルの学習改善ではなく表示条件の補助であり、一般的な精度・入力遅延改善を主張しない。仕様04章§3.3へ理由と影響を追記した。v1/v2特徴量・LR・Viterbi・golden・schema・閾値値は不変。候補モデルは引き続きrelease_ready=false。
+
+### 検証と途中の失敗
+
+環境は前回と同じmacOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。scratch/cache/logは `build/auto-mixed/`、Coreはnative方式。ログへ出した入力・文脈はこのタスクの人工例だけで、実際の利用者の入力欄から採取していない。
+
+| 検証 | 結果 |
+|---|---|
+| 修正前の初期対照 | 4文脈中2 assertion失敗、1.107秒。`apple-before.log` / `apple-diagnostic.log`。文脈なしならraw、短い日本語文脈ではunresolvedになる条件を確認 |
+| 修正前の21文脈 | 完成語の英語span期待で18 assertion失敗、5.498秒。`apple-contexts-before.log`。診断用printは最終テストから除去 |
+| 修正前の入力途中を含む回帰 | 同じテストをHEAD実装で実行し76 assertion失敗、5.550秒。`apple-prefix-before.log`。検証後、作業中の修正をfinallyで戻した |
+| 最初の修正 | 11件中10件成功・実GPU1件skip、6.005秒。`apple-first-fix.log` |
+| 拡張した対象試験 | 13件中12件成功・実GPU1件skip、12.837秒。`apple-regression.log`。21文脈、7英単語、日本語対照、URL等、同じsessionで日本語確定→apple確定を3回確認 |
+| Core全体 | **166件中159件成功・7件skip、20 suite、19.536秒**。`apple-core-final.log`。既存manual、v1/v2 golden、Python/export parity、辞書だけで英語採用しない人工スコア対照を含む |
+| 実GGUF/GPU | 最終 **2件成功、skipなし、3.131秒**。`apple-zenzai-final.log`。日本語確定→apple逐次入力→確定/ackを3回、既存meeting/asitan/asitanote等も再生しzenzaiReadyを確認 |
+| GPU試験初回の失敗 | 新テストが遅延ロード前にzenzaiReadyを要求し1件失敗。実定義のzenzaiPendingを確認し、検査を変換実行後へ移した。期待値はzenzaiReadyのまま。`apple-zenzai.log` |
+| appビルド・署名 | 成功。`apple-build.log`。通常版とは分離した `build/auto-mixed/mixed-ime/azooKeyMixed.app`、strict署名検証済み |
+| 更新ツール | **11件成功、0.046秒**。`apple-installer-tests.log`。`update` 操作を追加し、既存Mixedのファイルだけ更新して入力ソースの登録・各モードの有効/無効を保つ。初回導入への誤使用は拒否。通常版と辞書の保全・障害復旧試験も再実行 |
+| 導入済み旧版での実Mach XPC | **意図した回帰失敗4件、0.185秒**。`apple-installed-before.log`。上記日本語確定後の逐次入力を旧helperで再現。利用者sessionには接続しない |
+
+Core全体のskipは当時の実GPU5件、導入済みhelper1件、offline dataset builder1件。設定を書き換える既存 `testOptionPunctuationMappings` は別途除外した。その後に追加したGPU専用1件は別実行で成功し、導入済みhelperの新回帰は旧版で失敗を確認した。全件成功の報告には含めない。既存の警告、SwiftLint未導入、Linux/Intel未実行は継続する。
+
+### 更新前の状況と未確認事項
+
+APIでMixedの親sourceと自動モードがenabled=true、自動モードがselected=trueと確認できた。日本語／英数モードは利用者側の選択でdisabledなので、その設定を変えないため再登録しない専用update経路を用意した。
+
+修正版のビルドと検証は済んだが、Mixedが現在使用中のためまだ置き換えていない。未確定の入力を消さず更新するため、利用者へ入力確定とABC／標準日本語への一時切替を依頼した。実機IMKの修正後打鍵、修正版を導入した後の実Mach XPC、Chromium／secure field／長時間入力はこの時点では未実行。通常版のインストール・削除・登録・起動設定には触れていない。
+
+モデルSHA-256は `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581`。T3品質gate、T6中央編集、T7の広範な精度・性能・ログ監査、T8一般配布の残作業は完了扱いしない。今回の差分は未コミット。
+
+最終確認：`git diff --check` 成功、モデルchecksum不変。更新dry-runはstrict署名・helper identity検証に成功した（`apple-update-dry-run.log`）。source resourcesに実験マーカーと一時リンクがないことを確認した。
+
+
+### 修正版の反映完了（2026-09-24追記）
+
+利用者の「切り替えた。修正版を反映して」を受け、選択中の入力ソースがMixed以外であることを再確認して更新した。HEADは引き続き `fa73fcc1cd4289671d9f7279012b97cf10242549`。前節の未コミット差分は保持した。
+
+最初の更新は専用LaunchAgentのbootstrapがEIO=5となり、旧Mixedアプリとjobへ自動復旧した（`build/auto-mixed/apple-update.log`）。停止要求の完了後にもlaunchdに専用jobが残っている場合があるため、`stop_server` がそのラベルの消失を最大8秒待つよう修正した。単純にbootstrapを既存jobへ重ねる処理にはしない。停止待ちの間は旧ファイルを置換しない試験と、8秒の上限試験を追加。導入ツールの**13件が成功、0.049秒**（`apple-installer-stop-tests.log`）。従来の復旧・通常版保全の期待値は維持した。
+
+その後の `python3 Tools/install_mixed_ime.py update` は成功した（`apple-update-final.log`）。登録・有効化をやり直さず、専用アプリとhelperを更新した。導入先のapp実行ファイル・helper・モデルが検証済みbuildとSHA-256で一致すること、入力モードごとのenabled/selected状態と現在の入力ソースが更新前後で一致することを確認した（`apple-update-status-before.json` / `apple-update-status-after.json`）。通常IME・辞書・設定・Keychainには変更を加えていない。
+
+更新済みhelperに対する実Mach XPC試験は**2件成功、skipなし、0.653秒**（`build/auto-mixed/apple-installed-final.log`）。日本語確定とack後の `app → appl → apple` の表示・raw span・apple確定、および `asitahameetinggaarimasu → 明日はmeetingがあります` と二重確定防止を確認した。旧版で4 assertion失敗していた新回帰が修正版で通った。
+
+実IMK欄の手操作・Chromium・secure field・長時間入力は今回も未実行で、実XPC試験の成功と区別する。現在の入力ソースは利用者が切り替えた状態のまま。入力メニューで `azooKey Mixed（自動）` へ戻せる。今回の変更は未コミット。
+
+### 再ログイン後の反映確認（2026-09-24追記）
+
+利用者から「ログアウトしたが更新が反映されていないように見える」と報告されたため再調査した。HEADは `fa73fcc1cd4289671d9f7279012b97cf10242549` のまま、前回の未コミット差分を保持した。今回、新しい変換ロジックの修正・ビルド・再インストールは行っていない。
+
+- 起動中のMixedアプリと専用helperの実行元が、ユーザー用の導入先 `Library/Input Methods/azooKeyMixed.app` であることを確認。専用LaunchAgentも同じhelperを参照している。
+- 検証済みbuildと導入先のSHA-256を再照合し、アプリは `c57007c13f642a87571fc76d33996086c51ef5fd5b38740f1de0118df20f5929`、helperは `e38d59877217aec1121bd01f8618edccd7833508de4bea00ca36ea4f0f546b6a` で一致。モデルも従来の `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` で一致した。表示versionは引き続き1.0、bundle versionは1なので、表示だけではこの修正前後を区別できない。
+- 再ログイン後の実Mach XPC試験は **2件成功、0.280秒**（`build/auto-mixed/apple-after-login-xpc.log`）。専用の試験sessionで日本語確定後の `app → appl → apple` とmeeting混在を確認。利用者のsession・実入力文脈は取得していない。
+- クライアントboundaryの既存回帰は **8件成功、失敗なし、0.004秒**（`build/auto-mixed/apple-after-login-client.log`）。模擬IMK欄の試験であり、実機の状態遷移を全て再現するものではない。
+- TextEditの新規書類で画面操作ツールによる逐次キー入力を試みたが、Mixed自動・macOS標準日本語の両方で `asita` が英字のまま入力され、標準日本語での対照も成立しなかった。画面操作がIMEを経由する実打鍵であると確認できないため、appleが表示されたことをIMEの成功とは数えない。実IMK打鍵の検証は未完了。
+- 検証のため既に有効な入力ソースを一時選択し、終了時は開始時のABCへ戻した。登録・有効化・通常IMEのファイルや設定は変更していない。検証用書類は自分が入力した文字だけを消し、空の状態で一時領域へ保存して閉じた。既存文書は編集していない。
+
+現時点ではファイルの反映漏れは確認されず、利用者の症状は未解決。対象アプリ、入力・確定の順番、完成したappleが実際にどう表示されるかを利用者へ確認中。次はその操作列を固定し、自動モードの有効状態と実IMK経路を切り分ける。根拠のない閾値変更・テスト期待値の緩和・再登録は行わない。通常manual、学習モデル、v1/v2 golden、依存revisionは不変。
+
+利用者の追加報告「モード切り替えたよ」の後に再確認すると、選択中は `dev.azookey.inputmethod.azooKeyMixed.Automatic` だった。自動モードの選択を確認したが、未確定入力の有無は不明なのでアプリ終了・再起動は行っていない。この利用者による切替を、検証終了時にこちらがABCへ戻した操作と区別する。
+
+## 自動選択とcontroller初期モードの同期（2026-09-24）
+
+利用者から `asita` を確定した後の `apple` が「明日あっpぇ」となり、Codexの入力欄とメモの両方で再現するとの報告を受けた。前回確認したファイル一致・実Mach XPC成功だけでは、このアプリ側の症状を説明できていなかった。開始HEADは引き続き `fa73fcc1cd4289671d9f7279012b97cf10242549`、既存未コミット差分は保持した。会話のAGENTS、現状記録、現行README・03/06章・SDKのIMKStateSetting/TIS定義を確認した。
+
+### 調査結果と変更
+
+表示結果からmanualのローマ字入力へ流れている可能性を調査。実装には、`selectedInputMode` の初期値が日本語で、`setValue` 通知を受けるまでOSの選択状態を読まない欠落があった。ただし利用者の実controllerで通知欠落を観測したわけではなく、これが報告された症状の原因だとまだ断定しない。専用UserDefaultsの正式なinput_styleキーは未設定で、コード上の既定値は標準ローマ字。設定は書き換えていない。
+
+- `MixedInputModeResolver` を新設。通知未受信の場合だけactivation時と最初のkeyDownでOSの選択中sourceを確認し、Mixed自身の3入力ソースIDだけを受け入れる。通知が来ればその入力欄の指定を優先する。通常版や他IMEのsourceから自動を有効にしない。
+- controllerの既存モード同期処理を共有し、初期状態の補完からもcapability交渉を開始する。senderが取得できない場合は既存のclientを使用。activateServer内から候補位置を同期問い合わせしない制約は維持する。
+- 入力メニューの補助表示がmanualでも自動の説明を出していたため、実際のcontrollerの日本語／英数／自動状態を表示するよう修正。
+- 仕様03章§7.3に理由・影響・未確認範囲を記載。TIS参照はactivation当たり最大2回、入力・文脈を記録しない。モデル・特徴量・閾値・辞書・学習データ・依存・通常manualの変換処理は変更しない。
+
+### 検証
+
+macOS 27 arm64／Xcode 27／Swift 6.4。独立クライアントharnessは実アプリと同じSwift 5言語モード。
+
+- 最初の境界試験は14件成功（`build/auto-mixed/apple-mode-client-first.log`）。通知なしの開始・次の入力欄、activation後に選択情報が得られる場合、通知が前後どちらに来ても明示指定を優先すること、manualと他IMEの保全、通常版がTISを読まないことを検証。
+- 追加後は **15件成功、失敗なし、0.004秒**（`apple-mode-client-final.log`）。実 `AutoMixedIMEClient` と `AutoMixedServerSession`、模擬IMK欄・模擬segmenter/converterで、モード通知なし→asita→明日→Enter→apple→OS確定→別の欄で繰返しを検証。文字キーは実際のキーコードを使用。新テストはアプリの初期モードと確定後の配送を対象にし、学習モデル精度や実IMK成功を意味しない。以前の8件も成功。
+- インストーラーの既存障害注入試験は **13件成功、0.046秒**（`apple-mode-installer-tests.log`）。一時homeと模擬OS呼出しだけを使用。
+- 初回のアプリ全体ビルドとstrict署名検証は成功（`apple-mode-build.log`）。レビューでactivation時の候補位置問い合わせを避ける条件を明示した後、最終ビルド・strict署名検証も成功（`apple-mode-build-final.log`）。
+
+今回の境界テスト・初回ビルドに失敗はない。既存のweak capture・native build非推奨・最低macOS版差などの警告は残る。Core変換ロジックは今回変更していないため全Core/GPU試験は再実行していない。モデルSHA-256は `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` のまま。以前のテスト期待値は緩めていない。
+
+この時点では新しいモード初期化の修正は未導入。実際のOS通知順序、Codex／メモでの修正後の物理打鍵、secure field、長時間利用は未確認。前回の画面操作ツールは標準日本語の対照も成立しなかったため、今回その操作を実打鍵試験の代用にしていない。通常IMEの登録・インストール・設定には触れていない。
+
+最終の更新dry-runはstrict署名・Mixed専用identity検証に成功（`apple-mode-update-dry-run.log`）。`git diff --check` も成功。選択中がMixed自動のため未導入のままとし、利用者に入力確定とABCへの切替を依頼した。追加修正版の実機確認は、この更新後に行う必要がある。
+
+### 追加修正版の導入完了
+
+利用者が「ABCに切り替えた」と回答した後、APIでもABCを確認し、`python3 Tools/install_mixed_ime.py update` を実行して成功した（`build/auto-mixed/apple-mode-update.log`）。今回は停止・起動失敗や再試行による復旧はなかった。登録はやり直していない。
+
+導入先のapp実行ファイルSHA-256は `c5f0110d7a883e63539a380a601e917057aca248fa304f31ac101630b989c6b6` で最終buildと一致。helperとモデルも一致し、前回から不変。更新前後のMixed各モードのenabled/selected状態は同じで、選択中はABCのまま（`apple-mode-status-before.json` / `apple-mode-status-after.json`）。通常版やユーザー辞書・設定を変更していない。
+
+更新後の実Mach XPC回帰は **2件成功、skipなし、0.654秒**（`apple-mode-installed-final.log`）。これはhelperの回帰確認であり、今回変更したOS→controllerのモード通知経路の実機合格とは区別する。次は利用者がMixed自動を選び、Codex／メモでasita確定→appleを入力して表示を確認する。未解消なら入力メニューの新しい補助表示から、manual初期化とcapability失敗をさらに切り分ける。現段階では実機の症状解消は未確認。差分は未コミット。
+
+## 実機経路の診断ログ（2026-09-24）
+
+利用者から初期モード補完後も未解消との報告があり、「IME／サーバーにログを付け、不要なworkaroundを重ねず原因を調べる」と指示された。前回のモード通知欠落は仮説であり、実機の原因として確認できていなかった。今回、新しい自動復帰・閾値変更などは加えず、現状の実行経路を観測する。
+
+`MixedDiagnostics` を追加。値型はbool／数値／UUID／固定enumのみで、入力文字列や文脈、キーコード、候補、エラー説明を受け取らない。IME controllerのmode通知・開始条件・配送経路、AutoMixedIMEClientのcapability／client同一性／停止／応答採否、XPC送受信・失敗・timeout／切断、サーバーの受付と結果・runtime初期化段階を記録する。sessionとownerはランダムUUIDで対応づける。利用者の入力をログや学習データへ追加していない。
+
+診断は `Tools/build_mixed_ime.py --diagnostics` でMixed専用bundleの期限付きマーカーを生成した場合だけON。通常版と既定ビルドはOFF。24時間またはプロセス当たり10,000記録で新規出力を停止する。Unified Loggingを利用するためhelperのstdout/stderr抑制は維持。ログ回収用 `Tools/collect_mixed_diagnostics.py` は専用subsystem/categoryだけを読み、timestamp/pid/event/fieldsのみを作業用JSONLへ取り出す。07章の入力非保存方針を確認した。
+
+実施：境界試験15件成功（初回0.007秒、`build/auto-mixed/diagnostics-client-first.log`）、診断の入力・文脈非出力／UUID対応／未指定OFF試験3件成功・0.003秒（`diagnostics-core.log`）、アプリ全体buildとstrict署名検証成功（`diagnostics-build.log`）、更新dry-run成功（`diagnostics-update-dry-run.log`）。モデルと判定条件は変更していない。既存の警告は残る。この時点では診断版の導入と実機再現は未実行。Mixed自動が選択中なので、未確定入力を失わず更新するためABCへの切替を依頼した。通常IMEのインストール・削除・登録は行っていない。
+
+### 診断版の導入・記録確認
+
+利用者の切替完了後、APIでもABCを確認して更新成功（`diagnostics-update.log`）。導入先とbuildのアプリ・helper・モデル・診断マーカーのSHA一致を確認した。アプリは `e6b120cfad4ccf11f954b303530391a4c0675f201a5a741bc300d8b3c373d07a`、helperは `1ef32a7cbddeb117bd4e9c9dbd2ec68a044054335ad928e62977aca4a24dd19a`。各モードの有効／選択状態は保持し、選択中はABCのまま。
+
+最終境界試験も15件成功・0.007秒（`diagnostics-client-final.log`）。導入済みhelperへの人工例の実Mach XPC回帰は2件成功・0.649秒（`diagnostics-installed-test.log`）。専用Unified Logから38件（runtimeStage6、serverReceive16、serverReply16）の状態記録を取得し、marker→model→lexicon→policy→bridge→readyと、送受信を確認（`diagnostics-before-repro.jsonl`）。この試験は人工例であり、利用者の問題再現はこれから行う。利用者へMixed自動を選び、メモの新しい行でasita→Enter→appleを一度入力するよう依頼した。
+
+## かなキーによる自動モード解除の特定と修正（2026-09-24）
+
+利用者の診断版での再現結果は「明日あっpぇ」。専用ログを回収し、193件の状態記録を `build/auto-mixed/diagnostics-user-repro.jsonl` に保存した。入力本文・確定文脈は記録していない。開始HEADは `fa73fcc1cd4289671d9f7279012b97cf10242549` のまま、既存の未コミット差分を保持した。
+
+### 観測と原因
+
+メモでの操作に対応するcontrollerでは、20:24:32に自動モード通知とcapability確認（allowed/success/capabilityがすべてtrue）が完了。20:24:34に自動要求の最初のactionとしてdeactivateが送られ、同じイベントがmanualKeyへ配送された。その後controllerはjapaneseになり、文字・Enterはすべてmanual経路へ送られた。XPCの失敗・timeout・client不一致はなく、helperも各要求へ正常応答している。Codex側のcontrollerにも同型の遷移があった。症状発生時には英語のsegmenterまでキーが届いていなかった。
+
+`AutoMixedIMEClient.handle` はkey code 102（英数）と104（かな）の両方で `leaveForManual()` を呼び、nilを返してcontrollerの手動処理へ渡していた。手動かな処理の `switchInputLanguage(.japanese)` が自動を解除する。初回診断ではモードキーをinsertに分類していたためキー自体はログから断定できなかったが、利用者から「かなキーを押した」と回答を得た。標準ローマ字styleはログでも前後一貫してtrue。追加したかなキー回帰は修正前に5 assertion失敗し、この経路を再現した。
+
+### 変更と仕様差分
+
+- 自動が有効またはcapability確認中なら、標準ローマ字styleのかなキーをclient内で消費する。自動の状態・表示・pending rawを維持し、文脈取得やXPC送信を行わない。日本語優先の自動入力でかなキーを押す習慣により英語判定が失われることを防ぐ。
+- 旧仕様の「かなキーで手動日本語へ切替・即時確定」は自動モード内だけ廃止する。手動日本語への明示切替は入力メニューを使う。英数キーと非標準styleの手動復帰、manualモードのキー処理は変更しない。仕様03章§11.1と `Tools/AUTO_MIXED_IME.md` を更新した。
+- 通知欠落を補う仮説実装 `MixedInputModeResolver` を撤去。実機では通知が成功しており今回の原因ではなかったため。activation時／最初のkeyDownのTIS参照、関連refactor、補完専用の6テストを撤去し、既存の通知処理へ戻した。補完を前提にした結合テストは、明示的自動モードにかなキーを加える実際の再現操作へ置き換え、明日・apple・確定・別欄の期待値は維持した。以前からの8テストも保持した。
+- 状態診断に固定分類kanaKey／romanKeyと、英数キー／非標準styleによるmanualExit理由を追加。文字列・キーコードは保存しない。マーカーなしOFF、24時間／10,000件上限は維持した。
+
+### 実行済み検証と未確認事項
+
+macOS 27 arm64／Xcode 27／Swift 6.4。クライアントharnessはアプリと同じSwift 5言語モード。
+
+- 修正前：境界16テスト中、新規かなキー回帰の5 assertionが失敗（`build/auto-mixed/kana-client-before-fix.log`、0.099秒）。失敗は意図した自動解除の再現で、期待値は緩めていない。
+- 修正後：境界11件成功、0.007秒（`kana-client-after-fix.log`）。capability待機／開始後、未応答打鍵中、表示中、日本語確定後、別欄でかなキーを繰り返しても自動を維持すること、明日→appleの表示と確定、英数／非標準styleへの復帰時のpending raw一度だけ回復、manualでかなキーを従来経路へ渡すことを確認。模擬IMK欄・segmenter/converter・transportを用いた検証で、実機の表示合格とはしない。
+- 診断試験3件成功、0.003秒（`kana-diagnostics-test.log`）。入力・文脈がpayloadに含まれないこと、モード操作分類、相関ID、未指定OFFを確認。
+
+アプリビルド・導入・修正後の実IMK物理打鍵はこの記録時点では未完了。全Core／学習／モデル評価は今回の変更対象外で再実行していない。secure field・長時間入力・広範なアプリ互換性も未実行。既存のweak capture、native build非推奨、依存最低macOS版差の警告は残る。モデル、v1/v2 golden、学習データ、依存revisionは変更していない。通常IMEへのインストール・削除・登録変更は行わない。
+
+アプリ全体のビルドとstrict署名検証は成功（`build/auto-mixed/kana-build.log`）。モデルSHA-256は従来どおり `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581`。更新dry-runもMixed専用identity・署名検証に成功（`kana-update-dry-run.log`）、`git diff --check` 成功。現在Mixed自動が選択中なので、この時点では未導入。利用者へ入力確定とABCへの切替を依頼した。修正後の物理打鍵・新しい診断ログによる経路確認は更新後に行う。
+
+### 修正版の反映完了
+
+利用者の「ABCへ切り替えた」回答後にAPIでもABCを再確認し、Mixed専用updateが成功（`build/auto-mixed/kana-update.log`）。入力ソース登録・有効化はやり直していない。更新前後の入力ソース状態は一致し、ABCのまま（`kana-update-status-before.json` / `kana-update-status-after.json`）。導入先とbuildのapp、helper、モデル、診断マーカーはSHA-256一致（`kana-installed-hashes.json`）。appは `fcd59b07acf255616aa2194945079971a50a7fbf6239b23ba468526a6ec7f244`、helperは `dc580a3a9a9ec50a314c2765e47afc6a5d199f359036ea5560a99a5d8e4c3040`。通常版や利用者の辞書・設定は変更していない。
+
+CIのSwiftLintはこの環境にコマンドがないため未実行（未導入）。コンパイル・関連テスト・差分空白検査の成功と区別する。
+
+更新済みhelperへの実Mach XPC回帰は2件成功、skipなし、0.648秒（`build/auto-mixed/kana-installed-tests.log`）。日本語確定後のappleとmeeting混在・二重確定防止を人工例で確認した。この試験はIMKのかなキー経路を通らないため、実機の解消確認とは区別する。利用者へMixed自動を選び「かな → asita → Enter → apple」を物理打鍵するよう依頼した。修正後の表示結果とログ照合は返答待ち。変更は未コミット。
+
+### 利用者の物理打鍵と修正後ログの照合
+
+利用者は再現操作への回答で「明日appleになった」と確認した。更新後の状態ログ364件を `build/auto-mixed/kana-post-update-events.jsonl` に回収（更新前の終了処理・人工XPC回帰・フォーカス遷移も含む）。新appプロセスの対象controllerでは、20:37:40にautomatic通知とcapability確認成功、20:37:41のkanaKeyは `kind=automatic, accepted=true`。その後の文字・Enterはautomaticへ配送され、同じsessionのhelper応答はready、client側の採否もaccepted=trueだった。この入力中にmanualKey、manualExit、XPC失敗・timeoutはなく、20:37:52のフォーカス離脱までモードはautomaticを維持していた。
+
+入力本文はログにないため、表示文字列の確認は利用者報告に基づく。状態ログはキーの配送・応答・モード維持を裏づける。今回のかなキーを含む再現手順は解消を確認した。Codex／メモの両方で修正後の全操作を網羅したこと、モデル精度の改善、T6以降全体の完了は主張しない。引き続きsecure field・長時間利用・広範なアプリの操作は未確認。
+
+既定ビルドの診断はOFF。導入済み診断版はビルド後24時間の期限またはプロセス当たり10,000件で新規記録を停止する。今回も通常IMEの登録・ファイル・設定は変更せず、既存ユーザー差分を保持した。修正は未コミット。次は通常利用での確認を進められる状態。

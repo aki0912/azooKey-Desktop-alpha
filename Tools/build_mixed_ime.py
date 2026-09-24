@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 
 sys.dont_write_bytecode = True
 from prepare_auto_mixed_ime_build import prepare, sha256, RESOURCE_NAMES
@@ -90,7 +91,7 @@ def sign_app(app):
     run("codesign", "--verify", "--deep", "--strict", app)
 
 
-def build(model, resources):
+def build(model, resources, diagnostics=False):
     model, resources = model.resolve(), resources.resolve()
     OUTPUT.mkdir(parents=True, exist_ok=True)
     write_plist(OUTPUT / "Info.plist", profile_info())
@@ -127,6 +128,8 @@ def build(model, resources):
             BUNDLE_ID + ".Automatic": "azooKey Mixed（自動）",
         })
     run("swift", "Tools/generate_mixed_ime_icon.swift", app / "Contents/Resources/auto.tiff", env=env)
+    if diagnostics:
+        (app / "Contents/Resources/auto-mixed-diagnostics.json").write_text(json.dumps({"enabled": True, "expiresAt": time.time() + 86400}))
     sign_app(app)
     run("swiftc", "Tools/MixedIMEControl.swift", "-o", OUTPUT / "MixedIMEControl", env=env)
     print("Built build/auto-mixed/mixed-ime/azooKeyMixed.app (local ad-hoc signature; not notarized).")
@@ -137,5 +140,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, default=BUILD / "independent-thresholds-refined-20260924/export/model.json")
     parser.add_argument("--resources", type=Path, default=BUILD / "runtime-resources")
+    parser.add_argument("--diagnostics", action="store_true", help="State-only unified logs for at most 24 hours / 10,000 events per process")
     args = parser.parse_args()
-    build(args.model, args.resources)
+    build(args.model, args.resources, diagnostics=args.diagnostics)

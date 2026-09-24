@@ -28,11 +28,15 @@ public enum AutoMixedExperiment {
         let data = try Data(contentsOf: resources.appendingPathComponent("auto-mixed-model.json"))
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         guard hash == config.modelSHA256 else { throw EnglishLexiconError.invalidData }
+        MixedDiagnostics.record(.runtimeStage, [.stage: .token(.model)])
         model = try LogisticLanguageModel(data: data)
+        MixedDiagnostics.record(.runtimeStage, [.stage: .token(.lexicon)])
         lexicon = try .bundled()
+        MixedDiagnostics.record(.runtimeStage, [.stage: .token(.policy)])
         policy = try .bundled()
         // Experimental IME preview and commit both keep learning disabled. Enabling
         // ack-driven candidate learning requires the later pending-token integration.
+        MixedDiagnostics.record(.runtimeStage, [.stage: .token(.bridge)])
         bridge = try ZenzaiSpanBridge(converter: converter, applicationDirectory: applicationDirectory,
                                       useZenzai: true, resources: resources, learningEnabled: false)
     }

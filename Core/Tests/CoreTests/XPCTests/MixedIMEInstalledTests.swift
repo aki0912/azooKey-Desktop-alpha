@@ -64,6 +64,40 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test func installedHelperKeepsAppleAfterJapaneseCommit() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-apple-probe-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction, left: String? = nil) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, context: .init(leftSideContext: left), action: action))))
+        }
+        func key(_ text: String) -> AutoMixedAction {
+            .key(.init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: 0))
+        }
+        _ = try await send(key("asita"))
+        let japanese = try #require(try await send(.commit).autoMixed?.commits.first)
+        #expect(japanese.text == "明日")
+        _ = try await send(.commitApplied(japanese.commitID))
+        for (index, character) in "apple".enumerated() {
+            let response = try await send(key(String(character)), left: "明日")
+            #expect(response.autoMixed?.raw == String("apple".prefix(index + 1)))
+            if index >= 2 {
+                #expect(response.snapshot.markedText.elements.map(\.content).joined() == String("apple".prefix(index + 1)))
+                #expect(response.autoMixed?.spans.map(\.kind) == [.raw])
+            }
+        }
+        let english = try #require(try await send(.commit).autoMixed?.commits.first)
+        #expect(english.text == "apple")
+        _ = try await send(.commitApplied(english.commitID))
+        try await probe.close(session)
+    }
+
     @Test func registeredHelperNegotiatesConvertsAndDeduplicatesThroughMachXPC() async throws {
         let probe = MixedIMEProbe()
         let session = "installed-mixed-probe-" + UUID().uuidString

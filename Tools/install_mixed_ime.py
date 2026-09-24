@@ -68,6 +68,18 @@ class MixedInstaller:
         except subprocess.CalledProcessError as error:
             if error.returncode != 3:
                 raise
+        # bootout can return before the job and its Mach endpoint disappear.
+        # Wait for this exact label to leave launchd before replacing/restarting it.
+        for attempt in range(81):
+            try:
+                self.run(["launchctl", "print", self.domain + "/" + SERVICE], capture_output=True)
+            except subprocess.CalledProcessError as error:
+                if error.returncode in {3, 113}:
+                    return
+                raise
+            if attempt == 80:
+                raise TimeoutError("Mixed ConverterServer did not finish stopping within eight seconds")
+            time.sleep(0.1)
 
     def start_server(self):
         # launchd may briefly retain the old Mach endpoint after a successful bootout.
@@ -88,14 +100,17 @@ class MixedInstaller:
                     raise error
                 time.sleep(0.2)
 
-    def install(self, source, dry_run=False):
+    def install(self, source, dry_run=False, update_only=False):
         source = source.resolve()
         self.validate_app(source)
         self.validate_targets()
+        if update_only and (not self.app.exists() or not self.agent.exists()):
+            raise ValueError("Update requires an existing isolated app and LaunchAgent")
         if source == self.app.resolve():
             raise ValueError("Source must be the build output, not the installed app")
         if dry_run:
-            print("Validated: install azooKeyMixed.app and its dedicated LaunchAgent; enable only its three modes.")
+            print("Validated: update Mixed files without registering or enabling input sources." if update_only else
+                  "Validated: install azooKeyMixed.app and its dedicated LaunchAgent; enable only its three modes.")
             return
         stage = self.app.with_name("azooKeyMixed.installing.app")
         backup = self.app.with_name("azooKeyMixed.previous.app")
@@ -124,7 +139,8 @@ class MixedInstaller:
             self.agent.write_bytes(plistlib.dumps(value))
             self.start_server()
             self.run(["launchctl", "kickstart", self.domain + "/" + SERVICE])
-            self.run([self.control, "register", self.app])
+            if not update_only:
+                self.run([self.control, "register", self.app])
             if moved_old:
                 shutil.rmtree(backup)
         except Exception:
@@ -144,7 +160,8 @@ class MixedInstaller:
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
-        print("Installed azooKey Mixed files. Check status for macOS activation; a logout/login and Keyboard > Text Input > Add may be needed. The selected input source was not changed.")
+        print("Updated azooKey Mixed files. Existing input source registration and enabled modes were preserved." if update_only else
+              "Installed azooKey Mixed files. Check status for macOS activation; a logout/login and Keyboard > Text Input > Add may be needed. The selected input source was not changed.")
 
     def uninstall(self, dry_run=False):
         self.validate_targets()
@@ -162,13 +179,13 @@ class MixedInstaller:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["install", "uninstall", "status"])
+    parser.add_argument("action", choices=["install", "update", "uninstall", "status"])
     parser.add_argument("--app", type=Path, default=BUILD / "azooKeyMixed.app")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     installer = MixedInstaller(Path.home(), BUILD / "MixedIMEControl")
-    if args.action == "install":
-        installer.install(args.app, args.dry_run)
+    if args.action in {"install", "update"}:
+        installer.install(args.app, args.dry_run, update_only=args.action == "update")
     elif args.action == "uninstall":
         installer.uninstall(args.dry_run)
     else:

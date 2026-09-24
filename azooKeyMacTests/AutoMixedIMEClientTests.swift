@@ -49,6 +49,24 @@ import XCTest
         XCTAssertFalse(client.isActive)
         XCTAssertTrue(server.commands.isEmpty)
         XCTAssertNil(client.handle(key("a"), client: field, inputStyle: .defaultRomanToKana, context: { .init() }))
+        XCTAssertNil(client.handle(key("かな", code: 104), client: field, inputStyle: .defaultRomanToKana, context: { .init() }))
+    }
+
+    func testKanaKeyKeepsAutomaticModeDuringNegotiationAndAfterCapability() {
+        for negotiating in [true, false] {
+            let server = Transport(), field = Field()
+            let client = AutoMixedIMEClient(server: server, experimentEnabled: { true }, render: { _ in })
+            client.requestedPolicy = .automaticMixed
+            client.activate(client: field, canEnable: { true })
+            if !negotiating {
+                server.commands[0].1(.init(snapshot: .empty, autoMixedCapability: .init(serverEpoch: UUID())))
+            }
+            XCTAssertEqual(client.handle(key("かな", code: 104), client: field, inputStyle: .defaultRomanToKana,
+                context: { XCTFail("A mode key must not read document context"); return .init() }), true)
+            XCTAssertTrue(client.isActive)
+            XCTAssertEqual(server.commands.count, 1, "Kana must neither cancel nor enter the raw buffer")
+            XCTAssertTrue(field.inserted.isEmpty)
+        }
     }
 
     func testFirstKeysWaitForCapabilityAndKeepTheirOrder() throws {
@@ -101,5 +119,110 @@ import XCTest
         XCTAssertEqual(original.inserted, ["asitan"])
         XCTAssertTrue(next.inserted.isEmpty)
         XCTAssertEqual(server.commands.count, 2)
+    }
+
+    func testKanaKeyPreservesCompositionJapaneseCommitEnglishInputAndNextField() throws {
+        struct Segmenter: LanguageSegmenter {
+            func segment(_ raw: String) throws -> [MixedSpan] {
+                raw.isEmpty ? [] : [try .init(sourceRange: ScalarRange(0, raw.unicodeScalars.count),
+                                             kind: raw == "asita" ? .japaneseRoman : .raw)]
+            }
+        }
+        final class Converter: JapaneseSpanConverting {
+            func candidates(for raw: String, span: MixedSpan) -> [MixedCandidate] {
+                [.init(token: "test-asita", text: "明日")]
+            }
+        }
+        let epoch = UUID()
+        let host = AutoMixedServerSession(epoch: epoch) { _ in
+            MixedCompositionEngine(segmenter: Segmenter(), converter: Converter())
+        }
+        let transport = Transport()
+        var displayed = ""
+        let client = AutoMixedIMEClient(server: transport, experimentEnabled: { true }) {
+            displayed = $0.snapshot.markedText.elements.map(\.content).joined()
+        }
+        var cursor = 0
+        func flush() throws {
+            while cursor < transport.commands.count {
+                let (command, reply) = transport.commands[cursor]
+                cursor += 1
+                switch command {
+                case .composition(.snapshot): reply(.init(snapshot: .empty, autoMixedCapability: .init(serverEpoch: epoch)))
+                case .autoMixed(let request): reply(try host.handle(request))
+                default: XCTFail("Automatic input must not be dispatched to the manual converter")
+                }
+            }
+        }
+        let codes: [Character: UInt16] = ["a": 0, "s": 1, "i": 34, "t": 17, "p": 35, "l": 37, "e": 14]
+        for _ in 0..<2 {
+            let field = Field()
+            client.requestedPolicy = .automaticMixed
+            client.activate(client: field, canEnable: { true })
+            func pressKana() {
+                let count = transport.commands.count
+                XCTAssertEqual(client.handle(key("かな", code: 104), client: field,
+                    inputStyle: .defaultRomanToKana, context: { XCTFail("Mode key must not read context"); return .init() }), true)
+                XCTAssertEqual(transport.commands.count, count)
+                XCTAssertTrue(client.isActive)
+            }
+            pressKana() // capability negotiation
+            try flush()
+            pressKana() // empty automatic composition
+            func type(_ text: String) throws {
+                for character in text {
+                    XCTAssertEqual(client.handle(key(String(character), code: codes[character]!), client: field,
+                        inputStyle: .defaultRomanToKana, context: { .init(leftSideContext: field.inserted.joined()) }), true)
+                    pressKana() // conversion response is still pending
+                    try flush()
+                }
+            }
+            try type("asita")
+            pressKana() // displayed Japanese must remain uncommitted
+            XCTAssertTrue(field.inserted.isEmpty)
+            XCTAssertEqual(displayed, "明日")
+            XCTAssertEqual(client.handle(key("\r", code: 36), client: field, inputStyle: .defaultRomanToKana,
+                                         context: { .init() }), true)
+            try flush()
+            XCTAssertEqual(field.inserted, ["明日"])
+            XCTAssertTrue(client.isActive)
+            pressKana() // exact user reproduction: Japanese commit followed by English
+            try type("apple")
+            XCTAssertEqual(displayed, "apple")
+            XCTAssertTrue(client.finishImmediately(client: field, keepMode: true))
+            try flush()
+            XCTAssertEqual(field.inserted, ["明日", "apple"])
+            XCTAssertTrue(client.isActive)
+            client.deactivate()
+            try flush()
+        }
+    }
+
+    func testRomanKeyAndUnsupportedStyleStillLeaveAutomaticAndRecoverPendingRaw() {
+        let cases: [(KeyEventCore, ConverterInputStyle)] = [
+            (key("英数", code: 102), .defaultRomanToKana),
+            (key("かな", code: 104), .defaultKanaJIS)]
+        for negotiating in [true, false] {
+            for (event, style) in cases {
+                let server = Transport(), field = Field()
+                let client = AutoMixedIMEClient(server: server, experimentEnabled: { true }, render: { _ in })
+                client.requestedPolicy = .automaticMixed
+                client.activate(client: field, canEnable: { true })
+                if !negotiating {
+                    server.commands[0].1(.init(snapshot: .empty, autoMixedCapability: .init(serverEpoch: UUID())))
+                }
+                XCTAssertEqual(client.handle(key("asitan"), client: field, inputStyle: .defaultRomanToKana, context: { .init() }), true)
+                XCTAssertNil(client.handle(event, client: field, inputStyle: style, context: { .init() }))
+                XCTAssertFalse(client.isActive)
+                XCTAssertEqual(field.inserted, ["asitan"])
+                if negotiating {
+                    server.commands[0].1(.init(snapshot: .empty, autoMixedCapability: .init(serverEpoch: UUID())))
+                    XCTAssertFalse(client.isActive)
+                    XCTAssertEqual(field.inserted, ["asitan"])
+                } else if case .autoMixed(let request) = server.commands.last?.0 {
+                    if case .deactivate = request.action {} else { XCTFail("Must retire the automatic session") }
+                } else { XCTFail("Missing deactivation") }
+            }
+        }
     }
 }

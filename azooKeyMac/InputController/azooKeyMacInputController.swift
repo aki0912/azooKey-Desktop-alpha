@@ -5,7 +5,7 @@ import InputMethodKit
 @objc(azooKeyMacInputController)
 class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // swiftlint:disable:this type_name
     let converterServerClient = ConverterServerClient()
-    @MainActor private lazy var mixedInput = AutoMixedIMEClient(server: converterServerClient) { [weak self] response in
+    @MainActor private lazy var mixedInput = AutoMixedIMEClient(server: converterServerClient, diagnosticID: converterServerClient.diagnosticID) { [weak self] response in
         self?.apply(response)
     }
     private var mixedModeMenuItem: NSMenuItem?
@@ -152,6 +152,8 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     override func activateServer(_ sender: Any!) {
+        MixedDiagnostics.record(.controllerActivate, [.owner: .id(converterServerClient.diagnosticID), .mode: .mode(selectedInputMode),
+            .recognized: .flag(sender is IMKTextInput)])
         super.activateServer(sender)
         self.activationGeneration &+= 1
         self.updateLiveConversionToggleMenuItem(newValue: self.liveConversionEnabled)
@@ -182,6 +184,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     override func deactivateServer(_ sender: Any!) {
+        MixedDiagnostics.record(.controllerDeactivate, [.owner: .id(converterServerClient.diagnosticID), .mode: .mode(selectedInputMode)])
         _ = mixedInput.finishImmediately(client: (sender as? IMKTextInput) ?? self.client(), keepMode: false)
         mixedInput.deactivate()
         self.activationGeneration &+= 1
@@ -198,6 +201,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     override func commitComposition(_ sender: Any!) {
+        MixedDiagnostics.record(.controllerCommit, [.owner: .id(converterServerClient.diagnosticID), .active: .flag(mixedInput.isActive)])
         if mixedInput.finishImmediately(client: (sender as? IMKTextInput) ?? self.client(), keepMode: true) { return }
         let activationGeneration = self.activationGeneration
         self.converterServerClient.sendIfSessionOpen({ _ in .composition(.commit) }, completion: { [weak self] response in
@@ -215,6 +219,13 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     // MARK: - setValue: 状態同期のみ
     @MainActor
     override func setValue(_ value: Any!, forTag tag: Int, client sender: Any!) {
+        var diagnostic: [MixedDiagnostics.Field: MixedDiagnostics.Value] = [
+            .owner: .id(converterServerClient.diagnosticID), .tag: .number(tag), .recognized: .flag(false)]
+        if let value = value as? String, let mode = IMEInputMode.resolve(value, identity: .current) {
+            diagnostic[.mode] = .mode(mode)
+            diagnostic[.recognized] = .flag(true)
+        }
+        MixedDiagnostics.record(.modeNotification, diagnostic)
         defer {
             super.setValue(value, forTag: tag, client: sender)
         }
@@ -225,6 +236,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
                 mixedInput.leaveForManual()
                 mixedInput.deactivate() // also invalidate an in-flight capability probe
             }
+            MixedDiagnostics.record(.modeApplied, [.owner: .id(converterServerClient.diagnosticID), .mode: .mode(mode)])
             selectedInputMode = mode
             mixedInput.requestedPolicy = mode.compositionPolicy
             if pendingConverterServerActivation != nil {
@@ -264,15 +276,25 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     }
 
     @MainActor private func activateAutomaticModeIfReady(client: IMKTextInput) {
+        logActivationGate()
         mixedInput.requestedPolicy = selectedInputMode.compositionPolicy
         guard selectedInputMode == .automatic, !mixedInput.isActive,
               inputState == .none, pendingKeyEventCount == 0 else { return }
         mixedInput.activate(client: client) { [weak self] in
             guard let self else { return false }
+            self.logActivationGate()
             return self.selectedInputMode == .automatic && self.inputState == .none
                 && self.pendingKeyEventCount == 0 && self.inputLanguage == .japanese
                 && self.inputStyle == .defaultRomanToKana
         }
+    }
+
+    @MainActor private func logActivationGate() {
+        guard MixedDiagnostics.enabled else { return }
+        MixedDiagnostics.record(.activationGate, [.owner: .id(converterServerClient.diagnosticID),
+            .mode: .mode(selectedInputMode), .active: .flag(mixedInput.isActive), .empty: .flag(inputState == .none),
+            .pending: .number(pendingKeyEventCount), .japanese: .flag(inputLanguage == .japanese),
+            .standardRoman: .flag(inputStyle == .defaultRomanToKana)])
     }
 
     override func menu() -> NSMenu! {
@@ -285,8 +307,13 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
                 appMenu.insertItem(item, at: 0)
             }
             MainActor.assumeIsolated {
-                mixedModeMenuItem?.title = selectedInputMode == .automatic && !mixedInput.isActive
-                    ? "自動：現在は日本語入力（準備中／利用不可）" : "自動：Spaceは空白・Tabは候補"
+                switch selectedInputMode {
+                case .automatic:
+                    mixedModeMenuItem?.title = mixedInput.isActive
+                        ? "自動：Spaceは空白・Tabは候補" : "自動：現在は日本語入力（準備中／利用不可）"
+                case .japanese: mixedModeMenuItem?.title = "現在は日本語入力（手動）"
+                case .roman: mixedModeMenuItem?.title = "現在は英数入力"
+                }
             }
         }
         return self.appMenu
@@ -304,8 +331,13 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
             ConverterTextContext(leftSideContext: self.getLeftSideContext(maxCount: 30),
                                  rightSideContext: self.getRightSideContext(maxCount: 30))
         }) {
+            MixedDiagnostics.record(.keyRoute, [.owner: .id(converterServerClient.diagnosticID), .kind: .token(.automatic),
+                .action: .token(MixedDiagnostics.kind(event.keyEventCore)), .accepted: .flag(handled)])
             return handled
         }
+
+        MixedDiagnostics.record(.keyRoute, [.owner: .id(converterServerClient.diagnosticID), .kind: .token(.manualKey),
+            .mode: .mode(selectedInputMode), .active: .flag(mixedInput.isActive), .action: .token(MixedDiagnostics.kind(event.keyEventCore))])
 
         // カスタムプロンプトショートカットのチェック
         if let matchedPrompt = checkCustomPromptShortcut(event: event) {
