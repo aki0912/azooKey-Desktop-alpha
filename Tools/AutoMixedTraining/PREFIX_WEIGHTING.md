@@ -47,7 +47,7 @@
 
 後続の利用者確認で「明日nx」が正解とされ、テスト訂正を依頼された。残る4 assertionを調べ、旧モデルのkind固定と通常辞書／Zenzaiの表記の混同を訂正した。日本語区間・読み・原文保持を検証し、通常辞書は実際の候補順位に基づく2表記に限定、実Zenzaiの完全一致は維持する。理由と影響は [05章の固定例契約](../../docs/azookey_auto_mixed_codex/docs/05_TEST_AND_EVALUATION.md#固定例の内部判定と表示の契約2026-09-25)、検証結果は [implementation_status.md](../../implementation_status.md) の「回帰テストの契約訂正」を参照。失敗の訂正はモデルの精度改善ではなく、上表のdev指標も不変。
 
-**候補は未採用。** `release_ready=false` を維持する。曖昧語の品質、入力方向による差、実機での操作性は引き続き評価が必要で、テスト訂正だけで実用品質を達成したとはしない。
+**2026-09-25、利用者の更新指示でローカルMixed版へ試用反映済み。** `release_ready=false` を維持し、配布品質の合格とはしない。曖昧語の品質、入力方向による差、実機での操作性は引き続き評価が必要で、テスト訂正だけで実用品質を達成したとはしない。
 
 ## 時間と検証
 
@@ -60,7 +60,7 @@ macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9、既存lockを使用。�
 - 実Swiftのdev入力途中評価：121.367秒。1候補8,024 snapshot。
 - 比較全体：222.931秒。独立test評価・実IMK試験は含まない。
 
-学習パイプラインの単体試験・fixtureのv1/v2学習／export・Python/Swift数値parityも実行した。失敗と再検証を含む詳細は [implementation_status.md](../../implementation_status.md) の同日追記を参照。raw/contextを評価reportへ記録せず、アプリ入力を取得していない。新候補のIME反映・実機打鍵・長時間利用・配布品質評価は未実施。
+学習パイプラインの単体試験・fixtureのv1/v2学習／export・Python/Swift数値parityも実行した。失敗と再検証を含む詳細は [implementation_status.md](../../implementation_status.md) の同日追記を参照。raw/contextを評価reportへ記録せず、アプリ入力を取得していない。後続のIME更新では実Mach XPCの5試験も成功したが、実機打鍵・長時間利用・配布品質評価は未実施。
 
 ## 再実行
 

@@ -1489,3 +1489,25 @@ macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。SwiftPM cache権限・na
 環境はmacOS 27 arm64／Xcode 27.0（27A266a）／Swift 6.4。SwiftPMのユーザーcache権限、ZIPFoundationの旧watchOS指定、native build非推奨の既存警告あり。SwiftLintはコマンド未導入で未実行。Python参照を再生成したが、学習パイプラインの再学習・単体試験は今回のテスト訂正対象ではなく未実行。`git diff --check` 成功。従来モデルSHA `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` と候補SHA `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22` は不変。
 
 今回のテスト訂正と新旧モデルでの確認は完了。候補の `release_ready=false` と未採用状態は維持し、4 assertionの訂正を精度改善と扱わない。devの入力途中の英語破壊・方向差など前回の指標はそのまま。新たな独立test品質評価、アプリbuild、実Mach XPC、IME反映、実機打鍵、長時間利用は未実施。モデル採用判断にはこれらを別途確認する。通常IMEおよびMixedのインストール・削除・登録・設定は変更せず、実際の入力本文や文脈を取得・記録していない。
+
+## コミットとMixed試用版の更新（2026-09-25）
+
+利用者の「コミットして。IME本体を更新して欲しい」に対応。テスト訂正と記録の5ファイルを `7b67bd0`（`Align mixed input regressions with display and reading contracts`）として `codex/mixed-prefix-regressions` へコミットした。このHEADからMixed専用アプリをビルドし、前回検証したprefix重み候補SHA `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22` を明示指定して反映した。`60ac059` の英単語抽出修正も含む。今回、新しい製品ロジックや再学習は追加していない。利用者のローカル試用更新として扱い、モデルの `release_ready=false` と品質未達の記録は維持する。
+
+### 更新と検証
+
+ログ・復旧用コピーは `build/auto-mixed/update-prefix-20260925/`。旧Mixedアプリを `previous-azooKeyMixed.app` として保存した。更新直前・直後ともmacOS標準日本語（`com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese`）が選択中で、Mixedの未確定入力を強制終了する状態ではなかった。
+
+- `Tools/build_mixed_ime.py --model build/auto-mixed/prefix-mass-20260925/export/model.json` によるhelperとアプリ全体のビルド、資源receipt照合、ad-hoc署名・deep strict検証が成功（`build.log`）。診断ログはOFF。既存の通常版と別bundle／service／保存先のprofileを使用した。
+- インストーラーの模擬OS試験13件成功・0.052秒（`installer-tests.log`）。一時領域だけの失敗・復旧・更新検証で、実インストール試験と区別する。
+- 専用 `update --dry-run` 成功後、`update` でMixedだけを入れ替え、専用LaunchAgentを再起動した（`update-dry-run.log` / `update.log`）。再登録・再有効化・入力ソースの切替は行わず、前後のMixed全モードの有効状態と選択中ソースが一致した（`status-before.json` / `status-after.json`、`current-before.txt` / `current-after.txt`）。
+- 導入先とビルドのSHA-256はapp本体・helper・モデルの3点で一致（`hashes-before.json` / `hashes-after.json`）。appは `10f4e5975b996d69d3077354826cd68368a72cb832c460715e9409d499bb8439`、helperは `bb48ba8058b0cfb1207e98db81177cdbeddcdef5afdbbc2cdeec7e9da514dd73`。bundleの有効マーカーも上記モデルSHAを指すことを確認した。
+- 更新済みhelperへの実Mach XPC試験5件・2 suite成功、skipなし、10.866秒（`installed-tests.log`）。既存4試験でappleの日本語確定後入力、長音、記号、混在文、commit重複除外を確認。追加の隔離診断1試験では文脈取得不可／空の両方で、`asitanx → 明日nx`、`asitanote → 明日のて`、`made → まで`、meeting混在文、`asitanotennkiwoosiete. → 明日の天気を教えて。` を逐次入力・貼り付け・確定・Escapeで確認した。meetingは完成した時点から英字保持、nxと句点は削除・再入力、句点の前後は「教えて」の保持も確認。
+
+追加診断は `InstalledPrefixModelVerificationTests.swift` としてbuild内に保存し、Coreテストへの一時リンクは終了後に削除した。先行する `probe-compile.log` は実サーバーへの接続フラグなしでコンパイルだけを確認したため1件skipであり、実行成功には数えない。後続の `installed-tests.log` で明示フラグを付けて実行済み。
+
+### 環境制約と残事項
+
+初回のsandbox内ではgit indexへの書込みが拒否されたため、そのcommit試行は失敗。ホスト側の許可された実行で同じ5ファイルをコミットした。入力ソースの初回sandbox内照会もHIServicesの接続エラーと不整合な状態を返したため採用せず、ホスト側で再取得した状態だけを更新判断と前後比較に使用した。自動承認レビューによる拒否はなし。ビルド・更新・実サーバー試験の失敗なし。環境はmacOS 27 arm64／Xcode 27／Swift 6.4、既存のSwiftPM・Xcode依存警告は残る。SwiftLintは未導入で未実行。最終差分空白検査は成功。
+
+コミットとMixed版の反映は完了。利用者は入力メニューでMixed（自動）を選んで試用できる状態で、選択操作はこちらでは行っていない。通常版のファイル・設定・辞書・登録を変更していない。実際のアプリ本文・文脈・入力履歴も取得していない。今回の確認は実サーバーに固定例を送った自動試験であり、更新後の実IMK物理打鍵、secure field、長時間利用、未閲覧データでの品質評価・一般配布は未実施。

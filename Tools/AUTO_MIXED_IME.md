@@ -7,11 +7,13 @@
 このMacで検証した構成はmacOS 27、arm64、Xcode 27、Swift 6.4。取得済みのGGUF・4 marisa資源とreceipt、学習済みruntime exportを使用する。スクリプトはコーパス取得や再学習を行わない。
 
 ```sh
-python3 Tools/build_mixed_ime.py
+python3 Tools/build_mixed_ime.py --model build/auto-mixed/prefix-mass-20260925/export/model.json
 python3 Tools/install_mixed_ime.py install --dry-run
 python3 Tools/install_mixed_ime.py install
 python3 Tools/install_mixed_ime.py status
 ```
+
+2026-09-25の試用更新では、英単語抽出の境界修正とprefix重み候補を反映した。モデルSHA-256は `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22`。この版を再現するときは上記の `--model` を明示する（スクリプトの省略時指定は旧モデルのまま）。モデルの `release_ready=false` は維持しており、一般配布の品質合格ではない。更新後の実Mach XPC試験で句点後の「教えて」、meetingの入力途中、`asitanx → 明日nx`、apple、長音、確定・原文回復を確認した。実IMKの物理打鍵は今回未確認。
 
 導入済みの版を更新するときは、未確定文字を確定し、ABCやmacOS標準日本語などMixed以外へ切り替えてから次を実行する。`update` は入力ソースを再登録・再有効化せず、現在のモード設定を保つ。
 
@@ -106,7 +108,7 @@ Mixedの入力ソースだけを無効化し、専用アプリとLaunchAgentを�
 利用者の明示的な調査依頼に対応する診断版は、次の指定で作成する。
 
 ```sh
-python3 Tools/build_mixed_ime.py --diagnostics
+python3 Tools/build_mixed_ime.py --model build/auto-mixed/prefix-mass-20260925/export/model.json --diagnostics
 python3 Tools/install_mixed_ime.py update
 python3 Tools/collect_mixed_diagnostics.py --last 10m
 ```
