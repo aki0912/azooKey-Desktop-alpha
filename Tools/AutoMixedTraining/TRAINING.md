@@ -2,7 +2,7 @@
 
 `pipeline.py` に6つのCLIを実装した。原本と権利確認資料を検証し、元文groupの分割を固定した後でローマ字variantとprefixを増やす。CPUでLRを学習し、別のcalibration区画でsigmoid校正を行い、Swift用JSONと検証用parityを書き出す。
 
-今回実行したのは、同梱fixtureによるパイプラインの動作確認だけ。fixtureの少数例で実際に係数をfitするが、出力は常に `kind=fixture` であり、本番学習や精度評価の代わりにはしない。権利確認済み実コーパスはこのリポジトリにない。T3全体は未完了、自動モードはOFFのまま。
+同梱fixtureによる動作確認に加え、2026-09-24に利用者が内容・権利を承認したAI作成原文50件でv1/v2のLRを学習した。校正用の各class 100位置という条件に届かず、校正は未完了。学習済みcheckpointを確認する [ローカルUIと実行結果](REVIEW_UI.md) を追加した。fixtureは引き続き `kind=fixture` として隔離する。T3全体は未完了、自動モードはOFFのまま。
 
 ## 環境とfixtureによる再実行
 
@@ -25,7 +25,7 @@ Swiftによる入力検証には既存Coreの依存解決済み環境が必要�
 
 原本はローカルJSONL。URLからデータを取得する実装はない。資料は現在 `docs/azookey_auto_mixed_codex/docs/04_MODEL_AND_DATA.md` と同ディレクトリの `schemas/` に配置されている。
 
-注釈方法を確認するための [AI作成サンプル50件と人手確認表](review_samples/REVIEW.md) を別に用意した。2026-09-24に利用者が原本50件とローマ字別表記13件の内容を全件採用した。[内容確認記録](review_samples/annotation_review.json) に対象IDとhashを保存している。権利statusはpending_reviewで、fixtureにも権利承認済み学習原本にも含めていない。次は権利・利用条件の確認記録を整える。
+注釈方法を確認するための [AI作成サンプル50件と人手確認表](review_samples/REVIEW.md) を別に用意した。2026-09-24に利用者が原本50件とローマ字別表記13件の内容を全件採用し、続けて権利確認と学習を指示した。[内容確認記録](review_samples/annotation_review.json) は当時の原本hashを保持し、権利承認は [RIGHTS_REVIEW.md](approved_samples/RIGHTS_REVIEW.md) と [manifest.json](approved_samples/manifest.json) に記録した。確認用の原本はpending_reviewの履歴として残し、provenanceだけを変更した承認済み原本50件を学習へ渡す。
 
 | モード | 受け入れるもの | 出力の扱い |
 |---|---|---|
@@ -42,7 +42,7 @@ approvedの `split=unassigned` は学習原本専用の拡張。既存span schem
 - ローカルのライセンス・確認記録の相対パスとSHA-256。権利確認資料は参照するだけで取得しない。
 - 元文・テンプレート・言い換え・文脈対照を同じgroupにする規則、加工内容、プライバシー確認済みの明示。
 
-原本側のprovenanceにあるsource_id・license_id・source_url・retrieved_atと承認manifestが一致することを検証する。確認できるのは承認情報の記載・照合・改変検知であり、ライセンスの法的適合性を自動判定するものではない。今回、実データへの承認を代行してはいない。
+原本側のprovenanceにあるsource_id・license_id・source_url・retrieved_atと承認manifestが一致することを検証する。確認できるのは承認情報の記載・照合・改変検知であり、ライセンスの法的適合性を自動判定するものではない。今回の承認記録は利用者の明示指示に基づく。
 
 fixtureと実データの混在、pending_review、証拠不足、hash不一致、余分なJSON項目、NaN/Inf、重複キー、不正なscalar被覆・contextを拒否する。checkpointとdatasetのhash・modeも照合する。これらのchecksumは事故検知用で、悪意ある書換えに対する署名ではない。
 

@@ -1,8 +1,8 @@
 # Auto Mixed Input 実装状況
 
-2026-09-24時点。**T0〜T2と文脈v2の回帰を維持し、T3準備として権利確認・分割・増強・学習・校正・export・評価のローカルCLIを追加した。T3全体は未完了。** 実行したのはfixture専用のパイプライン検証で、実コーパスの本番学習ではない。自動混在入力はOFFのまま。最新の検証と残る作業は末尾の「T3準備差分」に記録した。
+2026-09-24時点。**利用者が承認したAI作成原文50件でv1/v2のLRを学習し、結果を確認するローカルUIを追加した。校正はデータ不足で未完了、T3全体も未完了。** 元文groupを分割してから309行に増強し、fixtureと分離してfitした。自動混在入力はOFFのまま。最新の結果・検証・残る作業は末尾の「承認済み50原文の学習と確認UI」に記録した。
 
-v1とv2のPython／Swift数値一致を確認した。学習済み判定モデル、実Zenzai接続、混在入力のIMK接続は未実装。人工係数の対照試験は文脈が判定まで届くことを確認するもので、実際の曖昧語の判別性能やv2の優位性を示さない。以下のT0〜T2記録は当時の資料パスを含む。資料移動と今回の差分は末尾のT3欄に記録した。
+v1とv2のPython／Swift数値一致を既存fixtureで確認している。今回は承認済みデータの学習済みcheckpointを作成したが、校正済みの実用モデル、実Zenzai接続、混在入力のIMK接続は未完成。少数例の診断や人工係数の対照試験から、実際の曖昧語の判別性能やv2の優位性は主張しない。以下のT0〜T2記録は当時の資料パスを含む。
 
 ## T0：参照commitと現状の確認を完了
 
@@ -465,3 +465,61 @@ AMBIGUOUSの5件は、意図を固定しない評価用例として採用した�
 今回の返答は内容・注釈の確認として記録し、生成サービスの利用条件や権利確認の証拠を補ったことにはしない。provenanceのrights_statusはpending_review、previewのtraining_eligibleはfalseを維持した。学習用の権利確認manifestは未作成で、次は利用条件と許可用途の記録を整える。学習・校正・品質評価、IMEの変更は実行していない。
 
 確認記録の63 ID、2ファイルのSHA-256、確認表の50＋13件の採用判定、preview checksum、AMBIGUOUS 5件と権利statusの維持を検証し、git diff --checkも通過した。データ本文・実行コードの変更はないため、モデル学習やCoreテストは再実行していない。文書lintはsudachipy不足で失敗し、更新箇所は手動で通読した。
+
+## 承認済み50原文の学習と確認UI（2026-09-24）
+
+**v1/v2のLRを学習し、自由入力と正解例を比較するローカルUIを作成した。校正はデータ不足で停止しており、実用モデルの完成・T3完了とはしない。** 起動手順と結果は [REVIEW_UI.md](Tools/AutoMixedTraining/REVIEW_UI.md) に記載した。
+
+開始時のHEADは `52715a39ffcb1c709332e701bb3fc61bf7074146`、git statusはclean。ファイルとしてのAGENTS.mdは見つからず、会話の指示を適用した。T0〜T2、v1/v2特徴量、LR、Viterbi、golden、学習・モデルschema、依存revisionを変更していない。アプリからMixedCompositionEngineを構築する経路も追加していない。
+
+### 権利承認を反映し、fixtureと分けて学習
+
+利用者の「データの権利は大丈夫なので、学習して。学習した結果を確認するUIツールを作って欲しい。」を [RIGHTS_REVIEW.md](Tools/AutoMixedTraining/approved_samples/RIGHTS_REVIEW.md) に記録した。これは利用者による承認であり、第三者の法的審査を代行したという記録ではない。確認用原本とannotation_review.jsonのhashを保持し、provenanceだけを変更した承認済みコピーを作った。raw・ラベル・読み・架空の文脈・group・splitは元の50件と一致する。
+
+同梱fixtureで形式・parityを確認した既存パイプラインに、承認済み原本50件だけを渡した。確認用の派生13件を原本へ連結していない。外部コーパス・入力履歴を取得せず、既存の隔離venvを使用した。
+
+seed=20260924で36 groupをtrain/dev/calibration/testへ25/4/4/3 groupに分割した。原文数は31/7/9/3件。分割後の増強で原文50＋variant 13＋prefix 246＝309行となり、別splitと衝突した派生53行を除外した。元文単位の合計sample weight 1、train限定の語彙、devでのC選択、独立したcalibration/testという役割を維持している。
+
+両モデルともC=10を選択し、1,875位置でfitが完了した。v1の語彙は10,066、v2は10,176特徴。校正原文の採点対象はJA 45位置・RAW 36位置で、既存のapproved条件「各100位置以上」に届かず、両方とも `calibration partition has insufficient examples of both labels` で停止した。最低件数や期待値は変更していない。sigmoid校正、devでのdecoder・閾値選択、runtime exportは未実施。checkpointは `phase=fitted` / `release_ready=false`。既存schemaの `kind=production` は承認済み候補の識別名として残るが、本番品質を表すとは扱わない。
+
+初回成果物は `build/auto-mixed/approved-50-20260924/` のdataset、v1/v2のconfig・fitted checkpoint・calibration_status、report.json。新しい `train_review.py` でも同じ手順を実行し、`build/auto-mixed/approved-50-review-20260924/` に別保存した。dataset、語彙、係数、初期設定、fit指標は初回と完全一致。ソースの追加・修正に伴う環境manifestの実装hashとmodel_versionの差はある。出力済みのモデル・評価は上書きしていない。
+
+### 未校正の結果を診断用として表示
+
+test原文3件・56採点位置では、JA再現率はv1が22/41（53.7%）、v2が0/41（0%）。保留率はv1が21/56（37.5%）、v2が43/56（76.8%）。英語span破壊は両方0/4だが、Wilson 95%区間の上限は49.0%と広い。Brierはv1が0.09119、v2が0.09152だった。v2は保留が多く、このtestで日本語を採用していない。少数の自作例、未校正スコア、v1/v2の条件差を含むため、曖昧語の実用性能・文脈による改善・安全性を主張しない。
+
+仕様上の追加は、未校正checkpointにも限定的な確認UIを用意したこと。理由は、校正不足を隠さず、次に必要なデータや失敗例を確認できるようにするため。公式のexport/evaluateは引き続きcalibrated checkpointを要求する。UI用reportは `approved_small_sample_diagnostic` とし、校正の成否、分母、保留、信頼区間、非リリース状態を明示する。testを人が閲覧済みになる影響があるため、今後の調整後に独立した新しいtestが必要になる。
+
+UIは例文選択、自由入力、短い左文脈、文脈取得不可と空文字の区別、書記素単位のprefix、v1/v2の区間と文字スコア、区画別の診断値・不一致例を表示する。既存Python scorer・decoderを利用し、保護範囲は実 `ProtectedSpanDetector` をコンパイルした専用Swift bridgeで取得する。Zenzai・XPC・IMEは呼ばない。自由入力の未来suffix、正解・意図表記を判定へ渡さない。
+
+任意入力のraw・左文脈はPOSTで受け、サーバーログ・ファイル・ブラウザー保存領域へ記録しない。応答にも本文・文脈・特徴キーを含めない。Swift bridgeへ文脈を渡さず、rawだけをstdin経由で渡す。サーバーは127.0.0.1限定、Host/Origin検査、固定assetの配信、no-store。外部通信・CDN・テレメトリは使わない。承認済み学習例と架空の文脈は、明示的に渡された学習データ・静的レポートとして保存する。
+
+### 実行した検証、失敗、環境制約
+
+| 検証 | 結果 |
+|---|---|
+| 権利・原本・分割・増強 | 承認manifestの原本／証拠hashとschema検証を通過。原本50件のprovenance以外が不変。309行のgroup／split・近重複キーの漏洩なし、元文重み1を確認。build-datasetの実Swift読み照合も通過 |
+| 初回fitと再実行CLI | v1/v2のfit成功。新CLIでもdataset・語彙・係数・設定・fit指標が完全一致。既存出力とfixture入力の拒否も検証 |
+| 校正 | v1/v2とも各class 100位置条件で停止。失敗理由と45/36位置を保存。未校正checkpointの公式export/evaluate拒否も確認 |
+| Python最終回帰 | **34件すべて通過、skipなし**。既存25件＋新規9件。ログは `build/auto-mixed/approved-50-review-tests.log` |
+| UI推論の一致・Core連携 | 全50原文のライブ予測が静的reportと一致。全309行で実Core保護maskがdatasetと一致。URLの途中prefix、絵文字・結合文字、v1の文脈非依存、入力・文脈の非保存を検証 |
+| HTTP | 127.0.0.1の一時ポートでreport／推論応答、Host/Origin拒否、asset範囲、JSON・入力長エラー、no-store、入力とアクセスログの非出力を確認 |
+| 実ブラウザー | Codex内ブラウザーで例文切替、madeの左文脈変更／未取得、自由入力、空文脈、31 scalarのエラー、ZWJ・結合文字を切らないprefix、校正区画9件の表示を確認。検査時のconsole error/warnは0件。表示幅557pxの画面を目視確認 |
+| テスト作成中の失敗 | 新規テストのクラス属性runがunittest.runと衝突し、実行前にTypeError。review_runへ改名。次に原本比較テストでloaderによる検証用split=trainと保存済みunassignedを混同して1件失敗。保存済み原本同士を比較するよう修正し、provenance以外の完全一致という期待値は維持。最終34件は通過 |
+| その他の実行エラー | report作成後の一時集計コマンドに括弧不足がありSyntaxError。修正して集計を取得し、学習成果物は影響なし。ブラウザー操作ツールの空文字fillで入力が消えず待機が失敗したため、実欄を確認して全選択・削除で空文脈を再検証 |
+| 実行環境 | macOS 27.0 arm64、Swift 6.4、Python 3.11.9。既存requirements.lockのscikit-learn 1.9.1／numpy 2.4.6等を使用。sandbox内の初回サーバーbindはPermissionErrorで停止し、ローカル待受けを許可した実行で起動・HTTP検証が成功。プロセス確認用psもsandboxで拒否されたが、作成したサーバーの起動セッションで停止・再起動を確認 |
+| 文書・静的検査 | node --check、git diff --checkを通過。natural-japaneseのlintはsudachipy不足で失敗したため、追加文書を手動で通読。依存ダウンロードは行っていない |
+
+最終回帰のコマンドは次のとおり。fixtureのfitテスト用datasetと、承認済みモデルのUIテスト用runを別々に指定する。
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 \
+AUTO_MIXED_TRAINING_DATASET=build/auto-mixed/roman-augmentation-smoke/dataset.json \
+AUTO_MIXED_REVIEW_RUN=build/auto-mixed/approved-50-20260924 \
+build/auto-mixed/training-env/bin/python -m unittest discover \
+  -s Tools/AutoMixedTraining -p 'test_*.py' -v
+```
+
+承認済みモデルのSwiftスコアexport parityは校正未完了のため未実行。既存Coreの変更がないためpure Core全41件は今回は再実行せず、前回の通過記録を維持する。今回の309行の保護maskと別表記の読みは実Swiftで検証した。実機IME打鍵、実Zenzai、XPC/IMK、表示ヒステリシス、実入力欄の文脈取得、p95・メモリ、十分な独立品質評価は未実行。通常使用中のIMEのインストール・削除・登録・設定変更は行っていない。機能はアプリ未接続でOFF、T3全体は未完了。
+
+次は承認済みの独立元文groupと文脈対照を増やし、新しいデータ版で分割・学習・校正へ進める。最低100位置を満たすための校正例複製やtestからの移動は行わない。今回閲覧したtestに合わせた閾値調整も避ける。十分な独立testと条件を揃えたv1/v2比較、その後のT4以降の実機評価が残る。

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>azooKey · 学習結果</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body>
+<header><div class="brand"><span class="mark">a</span><strong>azooKey</strong><span class="divider"></span><span>学習ラボ</span></div><span class="local"><i></i> この端末で実行</span></header>
+<main>
+<section class="heading"><div><p class="eyebrow">AUTO MIXED / MODEL REVIEW</p><h1>学習結果を確認</h1><p class="muted">日英の境界と、文脈による判定の違いを確かめる。</p></div><span id="phaseBadge" class="badge">読み込み中</span></section>
+<div id="notice" class="notice" role="status">学習結果を読み込んでいます。</div>
+<section id="stats" class="stats" aria-label="データの概要"></section>
+<section class="workspace">
+<div class="panel input-panel">
+<div class="section-title"><h2>入力を試す</h2><span class="quiet">入力は保存されません</span></div>
+<label for="sample">確認済みの例文</label><select id="sample" aria-label="確認済みの例文"></select>
+<label for="raw">未確定の入力 <span class="quiet">raw</span></label><textarea id="raw" rows="3" spellcheck="false" autocomplete="off" placeholder="例：shiryouniURLwoharu"></textarea>
+<div class="context-label"><label class="check"><input type="checkbox" id="contextAvailable"> 確定済みの左文脈を使う</label><span id="contextCount" class="quiet"></span></div>
+<input id="context" type="text" autocomplete="off" spellcheck="false" placeholder="例：閉店時間" disabled aria-label="確定済みの左文脈">
+<p class="hint">OFFは文脈を取得できない状態。ONで空欄なら、取得できた空文字として判定します。</p>
+<div class="prefix-top"><label for="prefix">途中までの入力を再現</label><output id="prefixCount" for="prefix"></output></div>
+<input id="prefix" type="range" min="1" max="1" value="1"><p class="hint">その時点までの文字だけで、特徴と保護範囲を計算し直します。</p>
+<button id="predict" class="primary" type="button">判定する <span aria-hidden="true">→</span></button>
+<p id="error" class="error" role="alert"></p>
+<div id="reference" class="reference"></div>
+</div>
+<div class="panel predictions">
+<div class="section-title"><h2>モデルの判定</h2><span id="inferenceStatus" class="quiet" aria-live="polite"></span></div>
+<div class="legend"><span class="dot ja">日本語</span><span class="dot raw">英字</span><span class="dot hold">保留</span><span class="dot literal">保護・空白</span></div>
+<p class="hint">色は変換する区間の判定です。かな・漢字への変換は行いません。</p>
+<div id="predictionCards"></div>
+<details class="score-details" open><summary>文字ごとのJAスコア</summary><p class="hint" id="scoreHint"></p><div class="score-scroll"><table id="scores"><thead><tr><th>位置</th><th>文字</th><th>v1</th><th>v2</th></tr></thead><tbody></tbody></table></div></details>
+</div>
+</section>
+<section class="panel evaluation">
+<div class="section-title"><div><p class="eyebrow">DATASET DIAGNOSTICS</p><h2>正解データとの比較</h2></div><label class="partition-label" for="partition">表示する区画<select id="partition"><option value="test">test · テスト</option><option value="dev">dev · モデル選択</option><option value="calibration">calibration · 校正用</option><option value="train">train · 学習済み</option></select></label></div>
+<p id="partitionNote" class="hint"></p><div id="metrics" class="metrics"></div>
+<p class="hint">保留した日本語も見逃しに含めます。v1/v2では保留条件が異なるため、左文脈だけの効果を測る比較ではありません。</p>
+<div class="table-scroll"><table id="cases"><thead><tr><th>例文</th><th>意図した表記</th><th>v1の不一致</th><th>v2の不一致</th><th></th></tr></thead><tbody></tbody></table></div>
+</section>
+<footer><span>学習・推論はローカルで実行。通常使用中のIMEには反映していません。</span><span id="runInfo"></span></footer>
+</main>
+</body></html>
