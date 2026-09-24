@@ -150,7 +150,7 @@ async function start() {
   $("notice").textContent = blocked
     ? `LRの学習は完了しました。${insufficient ? `校正データは日本語 ${cal.ja_positions}文字・英語 ${cal.raw_positions}文字で、各100文字以上の条件を満たしていません。` : "校正処理は完了していません。詳しい理由は学習レポートに記録しています。"}条件は緩めず、未校正の結果を表示しています。本番利用の品質は未確認です。`
     : "学習と校正は完了しています。少数の自作データによる検証結果で、本番利用の品質を保証するものではありません。";
-  const stats = [["確認済み原文", report.original_count, "利用者が内容・権利を承認"], ["分割後の増強データ", report.row_count, `別表記 ${report.augmentation_counts.roman_variant ?? 0} / prefix ${report.augmentation_counts.prefix ?? 0}`],
+  const stats = [["用途承認済みの原文", report.original_count, "内容確認の範囲は承認記録を参照"], ["分割後の増強データ", report.row_count, `別表記 ${report.augmentation_counts.roman_variant ?? 0} / prefix ${report.augmentation_counts.prefix ?? 0}`],
     ["比較するモデル", "v1 / v2", "同じgroup分割でLRを学習"], ["テスト用の原文", report.partitions.test.originals, "少数データの参考診断"]];
   for (const [label, value, note] of stats) { const card = node("div", "stat"); card.append(node("div", "stat-label", label), node("div", "stat-value", String(value)), node("div", "stat-note", note)); $("stats").append(card); }
   const empty = node("option", "", "自由入力"); empty.value = ""; $("sample").append(empty);

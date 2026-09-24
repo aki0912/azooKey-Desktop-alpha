@@ -88,7 +88,7 @@ def near_key(raw):
     return re.sub(r"\d+", "#", " ".join(raw.lower().split()))
 
 
-def group_split(records, seed):
+def group_split(records, seed, frozen=None):
     parent = {r["group_id"]: r["group_id"] for r in records}
 
     def root(group):
@@ -112,12 +112,21 @@ def group_split(records, seed):
                 parent[b] = a
     components = sorted({root(g) for g in parent}, key=lambda g: (fingerprint([seed, g]), g))
     require(len(components) >= 10, "need at least ten independent source groups for four-way split")
+    assignments = {}
+    for group, previous in (frozen or {}).items():
+        require(group in parent, "frozen source group missing")
+        component, split = root(group), previous["split"]
+        require(split in SPLITS and assignments.get(component, split) == split,
+                "new source connects different frozen partitions")
+        assignments[component] = split
+    # Retain every existing partition. Only new, unrelated components are allocated.
+    components = [component for component in components if component not in assignments]
     # Largest remainder allocation; rounding is reported, not silently called exact 70/10/10/10.
     counts = [len(components) * p // 10 for p in (7, 1, 1, 1)]
     order = sorted(range(4), key=lambda i: (-(len(components) * (7, 1, 1, 1)[i] % 10), i))
     for i in order[:len(components) - sum(counts)]:
         counts[i] += 1
-    assignments, offset = {}, 0
+    offset = 0
     for split, count in zip(SPLITS, counts):
         for component in components[offset:offset + count]:
             assignments[component] = split
@@ -240,10 +249,22 @@ def prune_cross_split_augmentations(rows):
             or len(owners[near_key(row["record"]["raw"])]) == 1]
 
 
-def build_dataset(manifest_path):
+def build_dataset(manifest_path, baseline_path=None):
     manifest, records = load_sources(manifest_path)
     records.sort(key=lambda r: r["id"])
-    groups = group_split(records, manifest["seed"])  # Freeze BEFORE either augmentation.
+    baseline = load_dataset(baseline_path) if baseline_path else None
+    if baseline:
+        require(baseline["mode"] == manifest["mode"] and baseline["seed"] == manifest["seed"],
+                "baseline mode/seed must be preserved")
+        current = {record["id"]: record for record in records}
+        for row in baseline["rows"]:
+            if row["augmentation"] != "original":
+                continue
+            original_id = row["original_id"]
+            expected = dict(row["record"], id=original_id, split="train")
+            require(current.get(original_id) == expected, "frozen original missing or changed")
+    frozen = baseline["groups"] if baseline else None
+    groups = group_split(records, manifest["seed"], frozen)  # Freeze BEFORE either augmentation.
     table = roman_table() if manifest["augmentation"]["max_variants"] else {}
     rows = []
     for record in records:
@@ -274,6 +295,9 @@ def build_dataset(manifest_path):
                   source_manifest_sha256=fingerprint(manifest), groups=groups, rows=kept,
                   pruned_cross_split_augmentations=dropped, roman_revision=ROMAN_REVISION,
                   roman_table_sha256=ROMAN_SHA256 if table else None)
+    if baseline:
+        bundle.update(baseline_dataset_sha256=baseline["dataset_sha256"],
+                      frozen_group_splits={group: info["split"] for group, info in frozen.items()})
     bundle["dataset_sha256"] = fingerprint(bundle)
     return bundle
 
@@ -287,6 +311,8 @@ def load_dataset(path):
     require(bundle["mode"] == bundle["source_manifest"]["mode"] and
             bundle["source_manifest_sha256"] == fingerprint(bundle["source_manifest"]), "source manifest/mode mismatch")
     validate_records([row["record"] for row in bundle["rows"]])
+    for group, split in bundle.get("frozen_group_splits", {}).items():
+        require(bundle["groups"].get(group, {}).get("split") == split, "frozen group moved partitions")
     for row in bundle["rows"]:
         record = row["record"]
         require(bundle["groups"][record["group_id"]]["split"] == record["split"], "derived record escaped source group")

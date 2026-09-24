@@ -6,14 +6,26 @@ import Testing
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_TRAINING_EXPORTS"] != nil,
                    "Run the offline fixture training smoke to export v1 and v2 models"))
     func trainedFixtureExportsMatchPython() throws {
-        let paths = try #require(ProcessInfo.processInfo.environment["AUTO_MIXED_TRAINING_EXPORTS"])
+        try verifyExports(variable: "AUTO_MIXED_TRAINING_EXPORTS", fixture: true)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_APPROVED_EXPORTS"] != nil,
+                   "Explicitly validate calibrated approved exports without installing an IME"))
+    func trainedApprovedExportsMatchPython() throws {
+        try verifyExports(variable: "AUTO_MIXED_APPROVED_EXPORTS", fixture: false)
+    }
+
+    private func verifyExports(variable: String, fixture: Bool) throws {
+        let paths = try #require(ProcessInfo.processInfo.environment[variable])
         var versions = Set<String>()
         for path in paths.split(separator: ":") {
             let directory = URL(fileURLWithPath: String(path))
             let data = try Data(contentsOf: directory.appendingPathComponent("model.json"))
-            // These are actually fitted fixture-only weights, not a production training corpus.
-            #expect(throws: LanguageModelError.fixtureNotAllowed) { try LogisticLanguageModel(data: data) }
-            let model = try LogisticLanguageModel(testFixture: data)
+            if fixture {
+                // Keep the fixture rejection contract even when approved exports are tested too.
+                #expect(throws: LanguageModelError.fixtureNotAllowed) { try LogisticLanguageModel(data: data) }
+            }
+            let model = try fixture ? LogisticLanguageModel(testFixture: data) : LogisticLanguageModel(data: data)
             let parity = try JSONDecoder().decode(ExportParity.self, from: Data(contentsOf: directory.appendingPathComponent("parity.json")))
             #expect(parity.feature_spec_version == model.featureSpecVersion)
             versions.insert(model.featureSpecVersion)

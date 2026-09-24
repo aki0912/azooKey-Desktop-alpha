@@ -1,15 +1,24 @@
-# 50原文で学習したモデルをローカルUIで確認する
+# 学習したモデルをローカルUIで確認する
 
-利用者が内容・権利を承認したAI作成原文50件で、v1と文脈付きv2のLRを学習した。**学習は完了、校正はデータ不足で未完了。** UIでは未校正スコアと保留も含めて確認できる。通常使用中のIMEへ反映する機能はない。
+現在の結果は旧50原文＋Codex作成650件の計700原文。**学習・校正は完了したが、品質基準には未達。** 追加分の人手確認は未実施。作成方針と確認表は [DATA_PLAN.md](synthetic_expansion/DATA_PLAN.md) を参照。通常使用中のIMEへ反映する機能はない。
+
+| 最新test原文63件の診断 | v1 | v2 |
+|---|---:|---:|
+| JA再現率 | 648/960（67.5%） | 4/960（0.4%） |
+| 英語span破壊率 | 0/158（Wilson 95%上限2.4%） | 0/158（同左） |
+| 境界F1 | 0.702 | 0.000 |
+| 保留率 | 18.0% | 56.1% |
+
+v2は既存のdev探索で文脈なしの採用閾値1.0が選ばれ、大半の日本語を保留する。データ追加だけで実用化したとは言えない。保留もJAの見逃しに数え、目標90%を維持した。実入力分布での性能や文脈の効果は未確認。元文700件→増強後3,907行、前処理・fit・校正・レポートまでの実測は64.48秒。公式評価・parity・UI検証の時間は別。
 
 ## 作成済みの結果を開く
 
-リポジトリ直下で次を実行し、[学習結果UI](http://127.0.0.1:8765/) を開く。
+リポジトリ直下で次を実行し、[学習結果UI](http://127.0.0.1:8766/) を開く。
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
   Tools/AutoMixedTraining/review_server.py \
-  --run build/auto-mixed/approved-50-20260924 --port 8765
+  --run build/auto-mixed/expanded-700-se-20260924 --port 8766
 ```
 
 既に起動済みなら同じURLを開けばよい。終了は起動したターミナルのCtrl+C。ポートが使用中なら別の番号を指定し、起動時に表示されるURLを開く。成果物はgit管理外の `build/auto-mixed/` にあるので、別のcheckoutでは次の手順で作り直す。
@@ -19,7 +28,7 @@ PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
 3. スライダーで入力途中を試す。ブラウザーの書記素境界で区切るため、絵文字のZWJ列や結合文字を途中で切らない。サーバーには選んだprefixだけを渡し、特徴と実Coreの保護範囲を再計算する。表の位置・スコアはUnicode scalar単位。
 4. 下段でtrain/dev/calibration/testを選び、分母付きの診断値と不一致例を見る。「試す」で該当例へ戻れる。自由入力の正解ラベルは推測しない。
 
-未校正の0〜1スコアは正解確率ではない。v1/v2は保留条件が異なるので、左文脈だけの効果を測る比較には使えない。今回のtestは確認UIへ公開済みであり、ここに合わせて閾値を調整しない。
+校正済みでも小標本のスコアは実入力での正解確率を保証しない。未校正runを開いた場合は未校正と明示する。v1/v2は保留条件が異なるので、左文脈だけの効果を測る比較には使えない。今回のtestは確認UIへ公開済みであり、ここに合わせて閾値を調整しない。
 
 ## 同じ手順で新しい出力を作る
 
@@ -28,15 +37,18 @@ PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
 ```sh
 PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
   Tools/AutoMixedTraining/train_review.py \
-  --manifest Tools/AutoMixedTraining/approved_samples/manifest.json \
-  --output build/auto-mixed/new-approved-review
+  --manifest Tools/AutoMixedTraining/synthetic_expansion/generated/manifest.json \
+  --baseline build/auto-mixed/approved-50-20260924/dataset.json \
+  --output build/auto-mixed/new-expanded-review
 ```
 
 出力先は未作成のディレクトリを指定する。実行内容は既存の権利検証、group分割、増強・Swift照合、v1/v2のfit、校正の試行、確認レポートの順。seedは承認manifestから引き継ぎ、既存設定の正解・校正最低件数・評価基準を変更しない。生成後はサーバーの `--run` にその出力先を指定する。
 
 校正条件を満たさない場合も、`calibration_status.json` に失敗理由を保存し、`phase=fitted` の確認レポートを作る。コマンドがレポート作成を完了したことは、校正成功を意味しない。公式の `pipeline.py export/evaluate` は従来どおりcalibrated checkpointを要求する。再実行用CLIの検証結果は `build/auto-mixed/approved-50-review-20260924/` に別保存し、初回の凍結結果は上書きしていない。
 
-## 今回の学習結果（2026-09-24）
+## 旧50原文の履歴（2026-09-24）
+
+以下は拡充前の記録。最新700原文の結果・検証はこの文書の冒頭と `implementation_status.md` 末尾を参照。旧test・checkpoint・レポートは上書きしていない。
 
 [承認記録](approved_samples/RIGHTS_REVIEW.md) に従い、確認用原本のprovenanceだけを変更したコピーを使用した。fixtureを混ぜず、確認用の派生13行を原本として連結せず、50原文・36 groupから分割した。seedは20260924。
 
@@ -64,7 +76,7 @@ test原文3件・56採点位置の参考診断は次のとおり。保留した�
 
 次は独立した元文groupと文脈対照を増やし、新しいデータ版として分割・学習・校正を行う。100位置の最低条件を超えること自体は品質保証ではなく、十分な未閲覧test、条件を揃えた比較、実機・T4以降の評価も必要。件数合わせのために同じ例を校正用へ複製したり、testをdevへ移したりしない。
 
-## 入力の扱いと検証範囲
+## 入力の扱いと検証範囲（旧50件の実行記録）
 
 サーバーは127.0.0.1だけで待ち受け、Host/Originを検査する。自由入力のraw・左文脈はPOST本文で受け取り、アクセスログ・推論結果・ファイル・ブラウザー保存領域へ保存しない。レスポンスはno-store、外部CDN・通信・テレメトリは使わない。実Coreの保護検出へ渡すのはrawだけで、左文脈はPythonプロセス内で扱う。初回だけ純粋な保護検出ソースをswiftcでコンパイルする。
 

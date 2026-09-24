@@ -1,8 +1,8 @@
 # Auto Mixed Input 実装状況
 
-2026-09-24時点。**利用者が承認したAI作成原文50件でv1/v2のLRを学習し、結果を確認するローカルUIを追加した。校正はデータ不足で未完了、T3全体も未完了。** 元文groupを分割してから309行に増強し、fixtureと分離してfitした。自動混在入力はOFFのまま。最新の結果・検証・残る作業は末尾の「承認済み50原文の学習と確認UI」に記録した。
+2026-09-24時点。**旧50原文へCodex作成650件を追加し、計700原文でv1/v2のLR学習・校正・runtime exportを完了した。品質基準は未達で、T3全体は未完了。** 増強後は3,907行。追加650件の人手確認も未実施。自動混在入力はOFFのまま。最新記録は末尾の「700原文への拡充とデータ量の診断」を参照。
 
-v1とv2のPython／Swift数値一致を既存fixtureで確認している。今回は承認済みデータの学習済みcheckpointを作成したが、校正済みの実用モデル、実Zenzai接続、混在入力のIMK接続は未完成。少数例の診断や人工係数の対照試験から、実際の曖昧語の判別性能やv2の優位性は主張しない。以下のT0〜T2記録は当時の資料パスを含む。
+fixtureと今回の校正済み候補でPython／Swift数値一致を確認した。候補モデルはrelease_ready=false。実Zenzai接続・混在入力のIMK接続・十分な独立品質評価は未完成。実入力での曖昧語の判別性能やv2の優位性は主張しない。以下の各stageは当時の資料パス・実行結果を含む履歴である。
 
 ## T0：参照commitと現状の確認を完了
 
@@ -523,3 +523,83 @@ build/auto-mixed/training-env/bin/python -m unittest discover \
 承認済みモデルのSwiftスコアexport parityは校正未完了のため未実行。既存Coreの変更がないためpure Core全41件は今回は再実行せず、前回の通過記録を維持する。今回の309行の保護maskと別表記の読みは実Swiftで検証した。実機IME打鍵、実Zenzai、XPC/IMK、表示ヒステリシス、実入力欄の文脈取得、p95・メモリ、十分な独立品質評価は未実行。通常使用中のIMEのインストール・削除・登録・設定変更は行っていない。機能はアプリ未接続でOFF、T3全体は未完了。
 
 次は承認済みの独立元文groupと文脈対照を増やし、新しいデータ版で分割・学習・校正へ進める。最低100位置を満たすための校正例複製やtestからの移動は行わない。今回閲覧したtestに合わせた閾値調整も避ける。十分な独立testと条件を揃えたv1/v2比較、その後のT4以降の実機評価が残る。
+
+## 700原文への拡充とデータ量の診断（2026-09-24）
+
+**Codex作成650件を追加し、旧50件を保持して700原文で学習・校正した。実用十分な量・品質とはしない。** 仕様04章の最初の500〜1,000件という計画値に沿って拡充したが、追加分の人手確認は未実施。作成方針・次の件数目標・確認箇所は [DATA_PLAN.md](Tools/AutoMixedTraining/synthetic_expansion/DATA_PLAN.md)、全追加例は [確認表](Tools/AutoMixedTraining/synthetic_expansion/generated/REVIEW.md) に記載した。
+
+開始HEADは `899fca42ec64c5da5ab5e24ade190c709d48fcda`、git statusはclean。AGENTS.mdの実ファイルは見つからず、会話の指示を適用した。既存04/05章、学習パイプライン、固定Converterの実APIを確認。T0〜T2、v1/v2特徴量、LR、Viterbi、golden、span/model schema、依存revision、manual入力は変更していない。機能フラグはOFF。IMEのインストール・削除・登録・設定変更は行っていない。
+
+### 作成した例と仕様への追加
+
+`author_expansion.py` と明示した原稿から650件を作った。混在250、日本語100、英語140、短い検索語30、保護・Unicode30、20曖昧語×5条件100件。一般文を単語の直積で複製せず、各文章を原稿へ記述した。文脈はこのタスクで作った架空のものだけ。実入力や実アプリの文脈を収集・記録せず、外部コーパスもダウンロードしていない。用途の許可は今回の追加作成指示に基づき、旧50件の全件承認を新650件の人手確認へ拡張解釈していない。
+
+同一rawの文脈対照は一つのgroupにまとめる。取得不可／取得した空文字の40件はAMBIGUOUSとしてbinary学習から除外する。made/no/to/name等の無条件保留は追加していない。人には文脈100件と保護範囲30件を優先して確認してもらい、残りも用途別に点検する。
+
+既存testをtrainへ動かさないため、dataset builderと `train_review.py` に任意のbaselineを追加した。旧原文・mode・seedを検証し、旧groupのsplitを固定。異なる旧splitをつなぐ追加例は拒否し、新規成分だけを配分する。sealed datasetの任意metadata `baseline_dataset_sha256` / `frozen_group_splits` が増えるが、span/model schemaは変更しない。baselineを渡さない既存経路も維持する。
+
+その後、既存のローマ字variantとprefixを増強する。trainだけで語彙を作り、元文単位の合計sample weight 1を維持した。UIの「人が承認した例」と誤読し得る表示を「用途承認済みの原文」「収録されている例文」へ修正した。権利承認と注釈確認を区別するための変更で、判定処理は同じ。
+
+### 分割・学習・校正の結果
+
+最終出力は `build/auto-mixed/expanded-700-se-20260924/`。dataset SHA-256は `b5bd29bbf48da0b2f57f3152be2eb85bb8b2e7df1c501fd8248d5009754a707e`。606のsource groupを同一raw・近重複で602成分へまとめた。旧50原文と旧splitは完全一致。
+
+| 区画 | 成分 | 原文 | 増強後 | 原文のJA位置 | 原文のRAW位置 |
+|---|---:|---:|---:|---:|---:|
+| train | 421 | 481 | 2,728 | 6,900 | 4,560 |
+| dev | 61 | 77 | 393 | 1,033 | 545 |
+| calibration | 61 | 79 | 411 | 953 | 628 |
+| test | 59 | 63 | 375 | 960 | 748 |
+
+700原文＋405 variant＋2,802 prefix＝3,907行。別splitと衝突する派生1,345行を除外した。両モデルはdevでC=10を選択、語彙32,768。校正の最低条件JA/RAW各100位置を変更せず満たし、sigmoid校正・devでの採用条件選択・runtime exportを完了。phase=calibratedだがrelease_ready=false。
+
+| testの指標 | v1 | v2 | 仕様の目標 |
+|---|---:|---:|---:|
+| JA再現率（保留は見逃し） | 648/960 = 67.5% | 4/960 = 0.4% | 90%以上 |
+| JA適合率 | 100% | 100%（採用4位置のみ） | 98%以上 |
+| 英語span破壊率 | 0/158 | 0/158 | 0.5%以下 |
+| 破壊率Wilson 95%上限 | 2.37% | 2.37% | 標本数・区間も評価 |
+| 境界F1 | 0.702 | 0.000 | 0.90以上 |
+| 保留率 | 307/1,708 = 18.0% | 959/1,708 = 56.1% | 全raw維持を成功としない |
+| Brier | 0.02100 | 0.01790 | 参考診断 |
+
+v2は既存のdev探索でenter_ja=0.95、enter_ja_without_context=1.0、minimum_ja=0.55、minimum_path_margin=1.2が選ばれた。文脈なしの再現率は0。既存の `min(1, enter_ja + 0.07)` という候補生成が保留を増やす条件になっている。文脈ありのtestはJAわずか4位置・1語族であり、そこでの正答を文脈性能の証明にしない。スコアが改善しても採用条件が実用性を制限し得るため、追加データだけで解決したとは扱わない。
+
+旧50件とはtestの母集団・校正状態が異なるので、旧診断値との単純な精度向上比較はしない。今回のtestも閲覧済み。係数・閾値・期待値をこの結果に合わせて変更していない。次の開発はdevを使い、改善後の判定には未閲覧の独立testを用意する。現在158英語spanで、仕様の評価開始目安2,000spanには不足している。
+
+### データ量の診断と実測時間
+
+v2・C=1.0を固定した別の診断では、入れ子のtrain成分だけを使って語彙・LRを作り直し、固定dev原文でlog lossを測った。校正・復号閾値・test採点は行わず、学習曲線用のJSONだけを保存した。
+
+| train成分 | train原文 | dev log loss |
+|---:|---:|---:|
+| 100 | 124 | 0.23735 |
+| 250 | 298 | 0.17195 |
+| 421 | 481 | 0.14620 |
+
+この範囲ではデータ追加に伴いdev誤差が下がった。ただし単一seedの自作分布であり、1万件ならどの精度になるかは未確認。次の拡充計画は1万原文を目安にし、先にv2の採用条件と注釈を点検する。実用判定は件数でなく05章の品質・安全・性能基準で行う。
+
+今回から `perf_counter` の実測を各runのtimings.jsonへ保存する。最終実行は前処理・dataset保存6.42秒、v1 fit・保存15.55秒、v2 fit・保存15.16秒、校正・export・確認report27.23秒、合計64.48秒。後続の公式評価、size診断、parity、UI検証、手作業のデータ作成時間は含めない。同時に実行したsize診断などの負荷もあるため、一般的な所要時間の保証には使わない。旧50件へこの時間を遡及して記録しない。
+
+### 実行した検証、修正、残る制約
+
+| 検証 | 結果 |
+|---|---|
+| 原本検証 | 新650件のschema・区間・hash検証、553か所の日本語を実Converterで読み照合。生成物と原稿の一致、旧50件の不変、分割後の漏洩検査を通過 |
+| Python回帰 | 既存34＋追加8の **42件すべて通過、skipなし**（11.208秒）。旧50件のUI・HTTP・非保存回帰も維持。`build/auto-mixed/expanded-700-se-tests.log` |
+| Swift回帰・export parity | **42件／9 suite通過**（1.409秒）。既存fixtureのproduction読込拒否を維持し、今回の校正済みv1/v2を通常loaderで読んでキー・active index・logit・p・復号を照合。数値許容誤差1e-12は不変。`build/auto-mixed/expanded-700-se-swift-parity.log` |
+| 公式評価 | v1/v2とも `pipeline.py evaluate --traces` 成功。各evaluation.jsonへ用途別・文脈別診断を保存。ASCII原文62件・連続prefix 1,771step、過去位置反転数v1=1,702／v2=226。Unicode原文1件は未replay。IMKの打鍵試験ではない |
+| 表記修正 | 最初の新規テストで「こんにちは」がconnnichihaとなり失敗。期待値を変えず生成側をka/ki/ku/ke/koへ修正。後のUI確認でせ→ceを発見し、seを優先する回帰を追加。実Converterでは両方有効だが、一般的な打鍵例を作る目的に合わせて修正した |
+| 修正前の保存 | 最初のrun `expanded-700-20260924/` と、ceを含むrun `expanded-700-canonical-20260924/` をbuild配下に保持。ce版はv1再現率75.1%・61.79秒だったが最終結果へ採用しない。se修正後も全606 source groupのsplitは同一。閲覧後の表記修正なので、独立した新testでの再評価とは扱わない |
+| 一時集計エラー | 学習終了前にtimings.jsonを読むコマンドがFileNotFoundError。学習自体は継続・完了し、終了後に実測値を取得した |
+| 最新UI | 127.0.0.1:8766で700原文・3,907行・校正済み表示を確認。calibrationのmade対照で、v2は日本語文脈ならJA 4位置、英語文脈ならRAW 4位置。これは収録例の配線確認であり性能評価とは別。console error/warn 0件、幅557pxで表示を目視確認 |
+| 静的検証 | git diff --check、node --check、Python AST、manifest／原稿hash／sealed datasetの照合を通過 |
+| 文書lint | natural-japaneseのlintはsudachipy不足で失敗。依存を追加取得せず、手動チェックリストで追加文書を通読 |
+
+回帰再現用のPython環境変数は、既存の `AUTO_MIXED_TRAINING_DATASET=build/auto-mixed/roman-augmentation-smoke/dataset.json` と `AUTO_MIXED_REVIEW_RUN=build/auto-mixed/approved-50-20260924` に、新たに `AUTO_MIXED_EXPANSION_RUN=build/auto-mixed/expanded-700-se-20260924` を加える。unittest discoverのコマンドは前節と同じ。Swift parityにはfixtureのv1/v2 exportを従来どおり指定し、追加の `AUTO_MIXED_APPROVED_EXPORTS` に今回の `v1/export:v2/export` のパスを指定する。
+
+環境はmacOS 27.0 arm64、Swift 6.4、Python 3.11.9、既存のrequirements.lock。SwiftPMは既存のnative方式を使用し、既定方式の署名問題を解消したわけではない。ローカルHTTPテスト・UIはsandbox外の127.0.0.1待受けを許可して実行した。パイプラインと本タスクで外部コーパスや追加依存は取得していない。
+
+未実行：新650件の人手確認、実ユーザー分布の独立評価、2,000英語span以上の新test、複数seedによる量の検証、条件を揃えたv1/v2 ablation、実Zenzai、実機IME、XPC/IMK接続、実アプリからの文脈取得、表示ヒステリシス、p95・RSS測定、アプリ全体のビルド。T3全体の完了・本番性能は主張しない。
+
+次は文脈なしv2の閾値候補とdevの選択目的を点検し、人手確認済みの文脈対照・用途別原文を増やす。v1/v2・旧golden・凍結splitを保持し、閾値や特徴量を変える場合は理由と影響を別の小差分に記録する。実Zenzai統合はT4として分離する。

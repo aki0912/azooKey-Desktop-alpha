@@ -2,7 +2,7 @@
 
 `pipeline.py` に6つのCLIを実装した。原本と権利確認資料を検証し、元文groupの分割を固定した後でローマ字variantとprefixを増やす。CPUでLRを学習し、別のcalibration区画でsigmoid校正を行い、Swift用JSONと検証用parityを書き出す。
 
-同梱fixtureによる動作確認に加え、2026-09-24に利用者が内容・権利を承認したAI作成原文50件でv1/v2のLRを学習した。校正用の各class 100位置という条件に届かず、校正は未完了。学習済みcheckpointを確認する [ローカルUIと実行結果](REVIEW_UI.md) を追加した。fixtureは引き続き `kind=fixture` として隔離する。T3全体は未完了、自動モードはOFFのまま。
+2026-09-24に旧50原文へCodex作成650件を追加し、計700原文でv1/v2のLR学習・校正・exportを完了した。品質基準は未達で、T3全体は未完了、自動モードはOFFのまま。追加650件の人手確認も未実施。必要なデータ量と確認箇所は [DATA_PLAN.md](synthetic_expansion/DATA_PLAN.md)、結果の見方は [ローカルUI](REVIEW_UI.md) を参照。fixtureは引き続き `kind=fixture` として隔離する。
 
 ## 環境とfixtureによる再実行
 
@@ -54,6 +54,8 @@ fixtureと実データの混在、pending_review、証拠不足、hash不一致�
 4. 分割を保存してからJA spanのvariantを生成し、scalar長に合わせて後続spanをずらす。英語・literal・gapは書き換えない。
 5. 各元レコードに最大8 prefixを追加する。短prefixを優先し、残りはseedで決定する。未来の文字を含む特徴や保護maskを使い回さない。
 6. 別splitの原本・増強文と重複する増強文は除外し、件数を残す。元文や増強文を別splitへ移動して衝突を隠さない。
+
+追加データを既存の評価へ混入させないため、`train_review.py --baseline <sealed-dataset>` を指定できる。旧原文の完全一致とseed/modeを検証し、旧splitを維持する。別の旧split同士を結ぶ近重複は拒否し、新規成分だけを配分する。sealed datasetには任意の `baseline_dataset_sha256` と `frozen_group_splits` を追加する。span/model schemaや従来のbaseline未指定時の挙動は変更しない。実測時間は各実行の `timings.json` に記録する。
 
 原文の共通由来をrawだけで完全には判定できない。注釈者によるgroup_id付与が前提で、近重複検査は補助。初期の人手確認済み小規模データ向けに原本上限は10,000件、近重複検査はO(n²)としている。大規模コーパスへの対応は別途必要。
 

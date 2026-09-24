@@ -1,0 +1,562 @@
+# Codex-authored intent examples. [English to keep] / {literal} / hiragana reading.
+# One line is one authored intent; no Cartesian substitution or spelling clones here.
+@chat_mixed
+きょうの[lunch]はなににする
+[coffee]がさめるまえにのもう
+その[idea]ならためしてみたい
+あとで[message]をおくっておくね
+[weekend]はうちでゆっくりする
+この[photo]はいつとったの
+あしたの[meeting]にまにあいそう
+さきに[order]しておいてもいいよ
+[thanks]ってつたえておいて
+それはちょっと[surprise]だった
+こんどの[party]にはだれがくる
+[online]ならよるでもはなせる
+この[playlist]をききながらあるこう
+あたらしい[cafe]がえきまえにできた
+[sorry]だけではきもちがつたわらない
+その[joke]はあとからわかった
+わたしもその[team]をおうえんしている
+[good morning]からはじめてみよう
+もういちど[link]をおしえてもらえる
+きょうは[home]でしごとをする
+かえりに[bread]をひとつかってきて
+[movie]のつづきがきになる
+ここで[wait]していてくれる
+あの[dog]はひとなつっこいね
+[tomorrow]ならじかんがとれる
+ちいさい[size]のほうがもちやすい
+こっちの[color]もにあっている
+[maybe]とこたえたけどまだまよっている
+この[game]はふたりでもあそべる
+その[story]のつづきをきかせて
+[see you]はまたあうときのあいさつだよ
+よるの[walk]がちょうどよかった
+いまの[mood]にあうきょくをえらぶ
+[thank you]をさいごにつけた
+この[seat]はあいていますか
+おみやげの[cookie]をわけよう
+[chat]のつうちをいったんとめる
+きのうの[dinner]はおいしかった
+その[book]ならとしょかんにもある
+あさは[tea]をのむことがおおい
+つぎの[bus]までここですずもう
+[rain]のよほうだからかさをもっていく
+その[plan]はむりがなさそう
+いまは[busy]なのであとでかけなおす
+おなじ[route]でかえろう
+[music]がすこしおおきくきこえる
+やすみの[balance]もだいじにしたい
+きょうの[highlight]をひとつおしえて
+[great]っていわれてうれしかった
+この[room]はひかりがよくはいる
+@work_mixed
+しめきりの[deadline]をてちょうにかいた
+[agenda]はかいぎのまえにきょうゆうする
+この[proposal]にははいけいがたりない
+あさの[standup]ではこまっていることをはなす
+[review]のしゅうせいをひととおりおえた
+しりょうの[title]をもうすこしみじかくする
+[budget]のじょうげんをさきにきめよう
+この[task]はふたりでぶんたんしたい
+せんぽうから[reply]がとどいた
+[draft]のだんかいでいけんをもらう
+ふたりの[schedule]があうひをさがす
+きのうの[feedback]をちいむにつたえた
+[scope]がひろがりすぎていないかかくにんする
+かいぎの[minutes]をよみなおした
+[approval]がでるまでこうかいをまつ
+この[report]はすうじのねんどがちがう
+しんちょくは[weekly]ではなくかくしゅうでみる
+[owner]がきまっていないこうもくをのこした
+きょうは[remote]でさんかします
+しゅうせいりゆうを[comment]にかいておく
+[estimate]のぜんていもあわせてつたえる
+しめきりをのばすなら[priority]をつけなおす
+この[slide]はぐらふがこまかすぎる
+[summary]だけをさきにかくにんしてください
+あいての[timezone]にあわせてよやくする
+あたらしい[member]むけにてじゅんをまとめる
+[meeting room]をさんじまでつかう
+きょうの[goal]はしようをきめることです
+おきゃくさまの[request]をせいりした
+[follow up]のたんとうをきめておく
+この[version]はしゃないかくにんようです
+ほうこくの[format]をとういつした
+[contact]さきをまちがえないようにする
+やりとりの[history]からけいいをたどる
+しゅっせきしゃの[list]をさいごにみなおす
+[document]のえつらんけんげんをしらべる
+この[issue]はべつのかいぎでそうだんする
+こんしゅうの[workload]はすこしおおい
+[risk]とたいおうさくをわけてかく
+かいぎまえに[question]をあつめておいた
+つぎの[action]がわかるようにしめくくる
+[checklist]のぬけをひとつみつけた
+じゅんびができたら[ready]とかえしてください
+この[decision]をあとからたどれるようにする
+[presentation]のれんしゅうにつきあってほしい
+ふくすうの[option]をひかくしてからきめる
+しんきの[project]はらいげつはじまる
+[status]だけではおくれのりゆうがわからない
+ていしゅつまえに[attachment]をたしかめた
+きょうの[discussion]でぎもんがへった
+@dev_mixed
+[branch]をきりかえるまえにへんこうをかくにんする
+この[commit]にはせつめいをつけておこう
+[build]がとおってもどうさかくにんはひつようだ
+しっぱいした[test]をひとつずつしらべる
+[cache]をけすとさいしょだけおそくなる
+この[function]はへんすうをかきかえている
+[return]のまえでじょうけんをしらべる
+ふるい[config]がよみこまれていた
+[retry]のかいすうにじょうげんをつける
+へんこうした[file]だけをひかくする
+[string]のながさとばいとすうはちがう
+この[array]はじゅんじょをほぞんする
+[null]とからもじをくべつしたい
+おなじ[key]がにかいとうろくされている
+[timeout]がみじかすぎるかもしれない
+てすとようの[mock]でおうとうをかえす
+[server]のさいきどうがひつようだった
+この[client]だけでさいげんする
+[token]をろぐにださないようにする
+ほごした[URL]はそのままのこす
+[JSON]のかっこがひとつたりなかった
+[UTF-8]のもじれつとしてよみこむ
+[API]のもどりちをみてからはんだんする
+[SQL]のじょうけんにくうはくがはいっていた
+[git diff]でさいごのさぶんをみた
+[pull request]にけんしょうほうほうをかく
+[feature flag]をきったじょうたいでためす
+あたらしい[schema]へいこうするまえにほぞんする
+[debug]ようのひょうじがのこっていた
+この[warning]はべつのげんいんだった
+[socket]をとじてからしゅうりょうする
+かたほうの[thread]だけがまっている
+[async]のけっかがあとからとどく
+その[callback]はふるいじょうたいをみていた
+[merge]するまえにりょうほうのへんこうをよむ
+[package]のばんごうをこていしておく
+この[parser]はからのはいれつもよめる
+[error]のぶんしょうににゅうりょくをふくめない
+ふたつの[model]をおなじでえたでくらべる
+[prefix]だけでもはんていできるようにする
+@life_mixed
+りょこうの[ticket]をさきによういした
+[hotel]までのあるきかたをしらべる
+あさの[check in]にまにあうようにでる
+[map]ではこのみちがちかそうだ
+えきの[platform]でともだちをまつ
+[breakfast]がついているへやをえらんだ
+にもつの[weight]をはかっておく
+[passport]はべつのぽけっとにいれた
+つぎの[flight]はまだじかんがある
+[reservation]のなまえをつたえた
+この[recipe]ならうちにあるものでつくれる
+[oven]をあたためてからやさいをいれる
+こむぎこの[amount]をまちがえてしまった
+[soup]があついのでゆっくりのむ
+のこった[sauce]はあしたにつかう
+[salad]にれもんをすこしたらす
+なべの[heat]をよわめてふたをする
+[shopping list]をみながらあるく
+うりばの[label]をよくよんでみる
+この[bag]ならにもつがはいりそう
+[receipt]はすてずにとっておく
+おなじ[brand]でもかたちがちがう
+へやの[light]をもうすこしあかるくする
+[desk]のしたにけえぶるをまとめる
+まどぎわの[plant]にみずをあげた
+[laundry]がおわったらほしておく
+あさの[alarm]をいちじかんおそくした
+[calendar]にごみのひをかいておく
+かべの[clock]がすこしすすんでいる
+[garden]のはながさきはじめた
+いぬの[walk]はすずしいじかんにする
+[battery]がなくなるまえにじゅうでんする
+この[chair]はせなかにあっている
+[window]をあけるといいかぜがはいる
+こどもの[lesson]がもうすぐおわる
+[piano]のれんしゅうをきいていた
+かりた[umbrella]をわすれずにかえす
+[week]のはじめにこんだてをきめる
+この[box]にはわれものがはいっている
+[delivery]のじかんをかえたい
+@search_mixed
+[Python]でにちづけをくらべるほうほう
+あめのひにいける[museum]をさがす
+[coffee beans]のほぞんのしかた
+かるくておりたためる[keyboard]
+[CSV]のもじばけをなおす
+くうはくをふくむ[file name]のあつかい
+[train]ののりかえじかんをしらべる
+よなかでもはいれる[restaurant]
+[note taking]につかうぺんのえらびかた
+しょしんしゃむけの[Swift]のほん
+[dry cleaning]のうけとりびをかくにん
+ちいさなへやの[layout]をかんがえる
+[bread recipe]をこむぎこからさがす
+ほぞんした[password]のけしかた
+[book review]をよむまえにあらすじをみる
+いえでつかう[headphone]のひかく
+[bike rental]ができるばしょ
+りょこうしゃむけの[city pass]
+[time difference]をかんたんにけいさんする
+ながい[URL]をぶんちゅうにいれるほうほう
+@mixed_spaced
+あした [design review] のあとでそうだんしたい
+[Good evening] といってへやにはいった
+ひるやすみに [quick chat] をしませんか
+[Read more] のぼたんをおす
+このばあいは [not now] をえらぶ
+[Send feedback] はがめんのしたにある
+とりあえず [small start] でためしてみる
+[Open file] のとなりにあるこうもく
+きょうのめもは [work in progress] です
+[No problem] とこたえてくれた
+らいしゅうの [team lunch] をたのしみにしている
+[Save as] でべつのなまえをつける
+ここには [your name] とかいてある
+[One more thing] とまえおきしてはなした
+しりょうには [for reference] とそえておいた
+[Take care] でてがみをむすぶ
+このやりかたは [trial and error] にちかい
+[Do not disturb] のふだをかける
+このかだいの [next step] をきめよう
+[Back to top] でぺえじのうえにもどる
+しつもんのまえに [thank you] とつたえた
+[In progress] のままになっている
+あたらしいかたには [welcome] とこえをかける
+[Check out] のじかんをきいた
+あのことばは [just in case] といういみです
+[Out of office] のへんしんをせっていした
+にちようびは [family time] にしている
+[Keep going] とおうえんしてもらった
+このこうもくは [optional] なのでからでもよい
+[Join meeting] からさんかする
+このぶぶんだけ [read only] にしたい
+[Stay tuned] とさいごにかいてあった
+すべてのぺえじに [page number] をいれる
+[No entry] のひょうじをたしかめた
+たんじょうびのめっせえじに [best wishes] とかいた
+[Try again] をおすまえにせつぞくをみる
+まだ [under review] なのでへんこうをまつ
+[For example] のあとにぐたいれいをおく
+こんかいは [short version] だけおくる
+[See details] でくわしいせつめいがひらく
+おきゃくさまには [free trial] とあんないした
+[All done] といえるところまできた
+このせっていは [by default] でゆうこうです
+[Later] をえらんでいったんとじる
+このしつもんは [yes or no] でこたえられる
+[On the way] とへんしんしておいた
+そのばしょは [open space] とよばれている
+[Please wait] のあいだにじゅんびをする
+つぎのぺえじには [terms and conditions] がある
+[Good luck] とこえをかけてわかれた
+@japanese
+あしたはすこしはやくおきる
+きのうかりたほんをかえした
+あめがやんだらさんぽにいこう
+まどのそとでとりがないている
+すこしやすんでからつづけよう
+このみちはよるになるとくらい
+かばんのなかにかぎがみつかった
+でんしゃにのるまえにれんらくする
+あたたかいうちにめしあがってください
+きゅうにさむくなったきがする
+ちかくのおみせでやさいをかう
+ふたりであるくとはやくついた
+せんたくものをとりこんでおいた
+そのはなしははじめてきいた
+かえりみちにほしがみえた
+あさごはんをたべてからでかける
+しずかなへやでほんをよみたい
+かさをわすれたのでかしてほしい
+へやのすみにあたらしいたなをおいた
+となりのひとがまどをあけた
+おちゃをいれなおしてきます
+わからないところにしるしをつける
+きのうよりすこしうまくできた
+いそがなくてもじかんにまにあう
+つかいおわったらもとのばしょにもどす
+はやくねたのにまだねむい
+きょうのゆうがたならあいている
+やくそくのじかんをたしかめた
+きもちがかわったらおしえてほしい
+かぜがつよいのでそとにはださない
+やねにおちるあめのおとがする
+むかしすんでいたまちをおもいだす
+ちいさなこえでもよくきこえる
+みんながそろうまでここでまつ
+つぎのかどをみぎにまがってください
+このさきはくるまがはいれない
+えきまえのはしをわたる
+ひるすぎにはくもがひろがった
+こどもたちがこうえんであそんでいる
+ふたをしめてれいぞうこにいれる
+しろいさらをよんまいならべた
+たまねぎをうすくきっておく
+もうすこしだけしおをたしてみる
+においでやきあがったのがわかった
+あついなべにはさわらないでね
+あまったぶんはわけてほぞんする
+くだものをかわごとたべた
+あしたのおべんとうもつくっておく
+あたたかいへやでゆきがとける
+あかりをけすまえにまどをしめる
+よていがかわったのででんわをした
+らいげつのやすみはまだきまっていない
+れんきゅうはとおくにいかずにすごす
+うみのちかくでしゃしんをとった
+やまみちにはゆきがのこっている
+ふねがゆっくりみなとにはいった
+おみやげをえらぶのにまよった
+にもつをあずけてまちをあるく
+このちずにはあたらしいみちがない
+かえるまえにもういちどけしきをみる
+てがみのさいごになまえをかく
+ひらがなでかくとよみやすくなる
+じゅんばんにせつめいしてもらった
+はじめのいちぎょうだけよんでみよう
+たいせつなところにはせんをひいた
+おなじことばでもいみがちがう
+こたえをみるまえにかんがえてみる
+なぜそうなるのかをたしかめたい
+すこしずつならおぼえられそうだ
+わすれないうちにめもをのこす
+このしごとはきょうじゅうにおわる
+さいごにすうじだけみなおした
+ひとりでかかえずにそうだんする
+あたらしいほうほうをためしている
+まえのきろくをさがしてみよう
+ふくざつなところをわけてかんがえる
+へんこうしたりゆうもいっしょにかく
+あいてのはなしをさいごまできく
+ここまでのないようをせいりする
+つづきはあしたのあさにはなそう
+ねこのめがきらきらしている
+あたらしいくつにまだなれない
+なつのあいだはひがながい
+ふゆのあさはゆびがつめたい
+はるになるとはなをみにいく
+あきのよぞらはすんでみえる
+あかちゃんがやっとねむった
+とけいのはりがちょうどかさなった
+いすをひくとおおきなおとがした
+なくしたとおもったものがでてきた
+ひさしぶりにともだちかられんらくがきた
+えきについてからきっぷをかった
+あたらしいじしょでことばをしらべる
+こっちのしゃしんはひかりがやわらかい
+こまったときにはたすけあいたい
+いったんたちどまってかんがえなおす
+ほんとうにひつようなものをえらぶ
+あまりむりをしないでください
+じぶんのぺえすでつづけていこう
+またあえるひをたのしみにしている
+@english
+[The kettle is still warm.]
+[Please leave the door open.]
+[We can meet after breakfast.]
+[There was a light breeze outside.]
+[I forgot where I put the keys.]
+[Could you lower the volume?]
+[This chair feels comfortable.]
+[The train arrived a little early.]
+[Let me know when you get home.]
+[My coffee has gone cold.]
+[She brought enough food for everyone.]
+[The garden looks different in winter.]
+[We took a longer route back.]
+[I need a quiet place to think.]
+[Would you like another cup?]
+[The children were playing near the gate.]
+[Please keep this receipt.]
+[That sounds like a good idea.]
+[I will return the book tomorrow.]
+[It may rain before dinner.]
+[The room has plenty of natural light.]
+[We waited until the shop opened.]
+[There is an extra blanket upstairs.]
+[Take your time with the answer.]
+[I left a note on the table.]
+[The soup needs a little more salt.]
+[Can we sit by the window?]
+[Her bag was lighter than mine.]
+[I would rather walk from here.]
+[The last bus has already left.]
+[A small change could make a difference.]
+[Please send the revised draft by Friday.]
+[We should agree on the scope first.]
+[The meeting ended earlier than expected.]
+[I have a question about this paragraph.]
+[Thank you for the detailed feedback.]
+[This estimate includes the setup work.]
+[Who is responsible for the next step?]
+[The attachment is missing from the email.]
+[Let's revisit this after the review.]
+[We have not made a final decision.]
+[There is no need to rush the discussion.]
+[I added a short summary at the top.]
+[Your comments helped clarify the problem.]
+[We need more time to compare the options.]
+[The current plan leaves room for changes.]
+[Please check the figures in the second table.]
+[I am available on Tuesday afternoon.]
+[The deadline depends on the approval date.]
+[This document is for internal use.]
+[Make sure everyone can access the notes.]
+[We can discuss the risks in person.]
+[I will follow up with the project owner.]
+[The proposed schedule works for our team.]
+[Please state the assumptions behind the estimate.]
+[There are two items left on the agenda.]
+[This request came from a different department.]
+[Keep the original copy for reference.]
+[The presentation should take about ten minutes.]
+[We will share the outcome next week.]
+[The server returned an empty response.]
+[Check whether the file exists before opening it.]
+[This function does not modify its input.]
+[The test failed on an unexpected value.]
+[Do not write private text to the logs.]
+[An empty string is different from a missing value.]
+[We should preserve the order of these items.]
+[The cache is rebuilt on the first request.]
+[Try a smaller example to reproduce the issue.]
+[The callback may arrive after the window closes.]
+[A retry limit prevents an endless loop.]
+[This branch contains two unrelated changes.]
+[The parser accepts spaces around the separator.]
+[We need a test for the boundary case.]
+[The old configuration is still being loaded.]
+[Both clients received the same response.]
+[This version keeps the previous behavior.]
+[The warning points to a separate problem.]
+[Avoid changing the expected result just to pass.]
+[The new code handles Unicode input correctly.]
+[Please explain why this check is necessary.]
+[A comment should describe the reason for the choice.]
+[The process stopped before writing the output.]
+[No network connection is required for this example.]
+[The model has not been calibrated yet.]
+[Keep the test set separate from the training data.]
+[The value must stay within the allowed range.]
+[We can compare the results using the same seed.]
+[The remaining cases need manual review.]
+[The error message should not contain the input.]
+[How far is the nearest station?]
+[I would like a room with a desk.]
+[Does this ticket include a return trip?]
+[The museum closes earlier on Sundays.]
+[We booked a table for four people.]
+[Is there a place to store our luggage?]
+[The map shows a path along the river.]
+[Could you recommend a quiet cafe?]
+[Our flight leaves in the morning.]
+[We should check the platform before boarding.]
+[I bought fresh bread on the way home.]
+[Add the vegetables after the water boils.]
+[The recipe uses less sugar than I expected.]
+[Let the cake cool before cutting it.]
+[We can save the rest for tomorrow.]
+[The label lists the ingredients clearly.]
+[This bag should fit under the seat.]
+[I prefer the smaller size.]
+[The delivery arrived while I was out.]
+[Please place the box near the entrance.]
+[That name is easy to remember.]
+[She said no without raising her voice.]
+[The path leads to a small lake.]
+[They made a wooden shelf together.]
+[Where are the spare batteries?]
+[This gift is for me.]
+[We can go once the rain stops.]
+[He asked me to wait here.]
+[I think so, but I am not certain.]
+[Take the second road on the left.]
+[The two pictures look almost the same.]
+[That notebook is mine.]
+[A bowl of miso soup would be nice.]
+[The koi stayed close to the surface.]
+[Sake was listed separately on the menu.]
+[We found information on the official site.]
+[They carried samples of iron ore.]
+[I hate to interrupt your conversation.]
+[The visitor came through the side door.]
+[Say hi to your sister for me.]
+[Not yet, but I am working on it.]
+[Yes, that should be enough.]
+[Maybe later this evening.]
+[Almost done with the first part.]
+[Thanks again for your help.]
+[See you near the main entrance.]
+[Please do not move this folder.]
+[I can hear you clearly now.]
+[That is all I need for today.]
+[Have a pleasant weekend.]
+@protected
+{https://example.invalid/guide} をひらく
+れんらくさきは {team@example.invalid} です
+{src/editor.swift} をよみなおす
+{max_retry_count} をふやした
+へんすう {userID} のなまえをかえる
+{2026-10-03} のよていをみる
+じかんは {09:30} とかいておく
+{README.md} にてじゅんをかいた
+{feature/mixed-input} でさぎょうする
+{localhost:8080} にせつぞくした
+[ID]は {abc_123} のままにする
+{Ctrl+C} でしょりをとめる
+{v2.4.0} をかくにんようにつかう
+{docs/setup.txt} がみつからない
+{sample+news@example.invalid} におくる
+{https://example.invalid/a?x=1&y=2} をこぴいする
+{👩‍💻}きょうのさぎょうがおわった
+{🍵}おちゃをいれてひとやすみ
+{👍🏽}これでだいじょうぶです
+{café} のもじをそのままのこす
+{👨‍👩‍👧‍👦}かぞくででかける
+{🇯🇵}[Japan]のひょうじをたしかめた
+{既存の文章}につづけてにゅうりょくする
+{検索}[keyword]をかえてためす
+{入力済み}[text]をそのままにする
+{保存先}は {tmp/output.json} です
+{A/B}のりょうほうをしらべる
+{12.5%}というすうじをのこした
+{#topic} のあとにくうはくをいれる
+{file_name} と[display name]をくべつする
+@search_terms
+あさごはんのつくりおき
+きょうのかえりみち
+たびのもちもの
+しゅうまつのよてい
+みずやりのかんかく
+おちゃのいれかた
+つくえのかたづけ
+へやのあかるさ
+さんぽのこおす
+にちづけのならべかた
+[morning routine]
+[packing list]
+[quiet workspace]
+[easy dinner ideas]
+[train station map]
+[weather forecast]
+[meeting notes]
+[project timeline]
+[keyboard shortcuts]
+[plain text editor]
+[garden care]
+[book recommendations]
+[coffee storage]
+[walking route]
+[file search]
+[Unicode normalization]
+[calibration curve]
+[logistic regression]
+[local web server]
+[source license]

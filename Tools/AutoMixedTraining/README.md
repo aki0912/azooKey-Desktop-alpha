@@ -69,4 +69,4 @@ Pythonの全テストには [TRAINING.md](TRAINING.md) の隔離venvを使う。
 
 v1の128件golden・325件のfresh特徴量／score・372件のdecoder pathは維持。v2は128件goldenと788件freshのキー・active index・logit・pをSwift/Python間で比較する。対照例は利用者提供の5件の意図契約と人工係数を使い、文脈経路、欠損、保留の調整可能性、raw保全、保護区間、古いrequestの識別を検証する。
 
-データの任意context項目は `record_context` で検査する。旧レコードはunavailable。availableなら30 scalars以下の文字列が必須、unavailableならleft_context自体を許容しない。元文・対照ペア・prefixのgroupがsplitを跨ぐ場合は拒否する。後続差分で学習CLIを追加し、利用者が承認したAI作成50原文のLR学習まで実行した。[学習結果UI](REVIEW_UI.md) でv1/v2を比較できる。校正用データが不足し、校正と独立した十分な品質・速度評価は未完了。T3全体の完了条件を満たしたものではない。
+データの任意context項目は `record_context` で検査する。旧レコードはunavailable。availableなら30 scalars以下の文字列が必須、unavailableならleft_context自体を許容しない。元文・対照ペア・prefixのgroupがsplitを跨ぐ場合は拒否する。後続差分で学習CLIを追加し、旧50原文とCodex作成650原文の計700件でLR学習・校正を実行した。[学習結果UI](REVIEW_UI.md) でv1/v2を比較できる。追加分の人手確認と、十分な独立品質・速度評価は未完了。T3全体の完了条件を満たしたものではない。
