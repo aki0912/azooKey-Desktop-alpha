@@ -48,7 +48,8 @@ public enum AutoMixedExperiment {
                 segmenter: JapanesePreferredSegmenter(model: model, lexicon: lexicon, policy: policy,
                     context: context.leftSideContext.map(CommittedLeftContext.available) ?? .unavailable, focus: sessionID),
                 converter: MixedSessionConverter(bridge: bridge, sessionID: sessionID,
-                    leftContext: context.leftSideContext, rightContext: context.rightSideContext, allowJapaneseReadingFallback: true))
+                    leftContext: context.leftSideContext, rightContext: context.rightSideContext, allowJapaneseReadingFallback: true),
+                punctuation: MixedPunctuationPolicy(leftContext: context.leftSideContext.map(CommittedLeftContext.available) ?? .unavailable))
         }
     }
 }

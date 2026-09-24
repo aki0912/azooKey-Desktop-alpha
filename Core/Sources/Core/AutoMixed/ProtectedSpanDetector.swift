@@ -6,6 +6,8 @@ public enum ScalarProtection: Sendable, Equatable {
 
 public struct ProtectedText: Sendable {
     public let scalars: [ScalarProtection]
+    /// Structured tokens must also bypass optional punctuation display rules.
+    public let verbatimScalars: [Bool]
     /// Boundary candidates only, not hard RAW masks or decoder resets.
     public let boundaryHints: [Int]
 }
@@ -13,12 +15,14 @@ public struct ProtectedText: Sendable {
 public enum ProtectedSpanDetector {
     public static func detect(_ raw: String) -> ProtectedText {
         let scalars = Array(raw.unicodeScalars)
-        var policies = initialPolicies(raw, scalars: scalars)
+        var verbatim = Array(repeating: false, count: scalars.count)
+        var policies = initialPolicies(raw, scalars: scalars, verbatim: &verbatim)
         protectAcronyms(scalars, policies: &policies)
-        return ProtectedText(scalars: policies, boundaryHints: boundaryHints(scalars, policies: policies))
+        return ProtectedText(scalars: policies, verbatimScalars: verbatim,
+                             boundaryHints: boundaryHints(scalars, policies: policies))
     }
 
-    private static func initialPolicies(_ raw: String, scalars: [Unicode.Scalar]) -> [ScalarProtection] {
+    private static func initialPolicies(_ raw: String, scalars: [Unicode.Scalar], verbatim: inout [Bool]) -> [ScalarProtection] {
         var policies = Array(repeating: ScalarProtection.literal, count: scalars.count)
         var offset = 0
         var tokenStart = 0
@@ -34,12 +38,12 @@ public enum ProtectedSpanDetector {
             // A URL without a separator keeps its entire suffix, even if it resembles JA.
             let delimiter = character.isWhitespace || character == "<" || character == ">" || character == "\""
             if delimiter {
-                protectToken(scalars, tokenStart..<offset, policies: &policies)
+                protectToken(scalars, tokenStart..<offset, policies: &policies, verbatim: &verbatim)
                 tokenStart = offset + length
             }
             offset += length
         }
-        protectToken(scalars, tokenStart..<scalars.count, policies: &policies)
+        protectToken(scalars, tokenStart..<scalars.count, policies: &policies, verbatim: &verbatim)
 
         // An internal ASCII apostrophe can belong to roman input (kan'i). The real
         // converter validates that interpretation in T4; no roman table is duplicated here.
@@ -89,7 +93,7 @@ public enum ProtectedSpanDetector {
         (65...90).contains(scalar.value) || (97...122).contains(scalar.value)
     }
 
-    private static func protectToken(_ scalars: [Unicode.Scalar], _ range: Range<Int>, policies: inout [ScalarProtection]) {
+    private static func protectToken(_ scalars: [Unicode.Scalar], _ range: Range<Int>, policies: inout [ScalarProtection], verbatim: inout [Bool]) {
         guard !range.isEmpty else {
             return
         }
@@ -100,7 +104,7 @@ public enum ProtectedSpanDetector {
         let version = token.range(of: #"^[vV]?[0-9]+(?:[.\-][0-9]+)+$"#, options: .regularExpression) != nil
         let web = token.hasPrefix("www.")
         if pathOrCode || email || file || version || web {
-            for index in range { policies[index] = .literal }
+            for index in range { policies[index] = .literal; verbatim[index] = true }
         }
     }
 }

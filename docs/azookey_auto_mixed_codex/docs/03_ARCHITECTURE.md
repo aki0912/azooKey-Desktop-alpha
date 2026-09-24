@@ -54,7 +54,7 @@ struct CompositionIdentity: Codable, Sendable, Equatable {
 
 例：`👩‍💻`はUnicode scalar 3個、UTF-16 code unit 5個、通常の書記素1個。`e\u0301`はscalar2個・書記素1個。Backspaceは書記素単位、データ範囲はscalar単位、IMK描画はUTF-16単位で計算する。
 
-不変条件：spanは原文全体を重複なく被覆し、空区間を持たない。literal/gap/rawの出力は対応する原文sliceと完全一致する。実入力の大文字小文字や記号を小文字化したモデル入力で置換しない。
+不変条件：spanは原文全体を重複なく被覆し、空区間を持たない。既定のrendererではliteral/gap/rawの出力は対応する原文sliceと完全一致する。Mixed自動の記号表示policyを明示的に指定した場合だけ、非保護literal内の5記号を同じ長さの日本語記号へ置換できる（§11.2）。実入力の大文字小文字や記号を小文字化したモデル入力で置換しない。
 
 ## 3. キーイベント処理
 
@@ -231,3 +231,13 @@ capabilityを待つ間の打鍵をclientが保持し、確認後に順番に送�
 旧試用仕様では英数／かなキーの両方で自動を終了していた。実機ログでは自動モード通知とcapability確認が成功した後にdeactivateとmanual配送が発生し、利用者もかなキーの使用を確認した。日本語優先の自動入力を選んだ利用者が、かなキーで意図せず英語判定を失うため仕様を変更する。これにより自動モード中のかなキーによる手動切替・確定は行われなくなる。通知欠落は今回の再現では観測されなかったため、先に追加した `MixedInputModeResolver` とTISによる初期補完は撤去した。通知は従来の `setValue` 経路で受ける。
 
 診断ログでは入力文字やkey codeを保存せず、かな／英数という固定のモード操作分類と手動終了理由を区別する。モデル・特徴量・閾値・辞書はこの修正で変更しない。模擬IMK欄の回帰と実機の物理打鍵は区別し、実行結果は `implementation_status.md` に記録する。
+
+### 11.2 日本語優先の記号表示（2026-09-24）
+
+`MixedPunctuationPolicy` をengine／rendererへ任意注入する。学習器やsegmenterが返すspan、原文バッファ、モデル入力は変更しない。`ProtectedSpanDetector` は従来のscalar分類に加え、既存の構造保護tokenを示すbool配列を返す。分類・境界ヒント・v1/v2 goldenは不変。保護token内は記号policyを適用しない。
+
+policyはliteralに含まれる `- . , [ ]` だけを置換する。全置換は単一BMP scalar同士でUTF-16長も同一。結合文字を含む書記素は変更しないため、literal runの非atomicな座標対応を維持できる。英語raw区間の直後は半角を継続し、空白や日本語で解除する。閉じ括弧は対応する開き括弧に合わせる。数値に隣接する記号は入力途中も原文保持する。
+
+新しいcompositionの左端は既存の短い確定文脈から判断する（末尾のASCII英字は英語の表示証拠として扱う）。文脈がない場合は日本語優先。この値はメモリ内のみ。`refreshCandidates` が後続日本語spanへ渡す左側表示、marked text、Tabの記号候補、Enter／OS確定の内容で同じpolicyを使う。EscapeのrawPreviewとprovider失敗時は原文を維持する。XPCのschema、SpanKind、モデルschemaは追加・変更しない。
+
+旧仕様「全ASCII記号をliteral表示」からの差分であり、日常の日本語入力で句読点・かぎ括弧・長音を打てるようにするための変更。T0〜T2の既定rendererやmanualを変えず、Mixedの試用runtime／playgroundで有効にする。英文や数値の直後の句読点を日本語にしたい場合など、文脈だけでは意図を断定できない制約は残る。原文復帰と保護token保持を優先する。

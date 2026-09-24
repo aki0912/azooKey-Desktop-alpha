@@ -64,6 +64,48 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test func installedHelperPrefersJapanesePunctuationExceptAfterEnglish() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-punctuation-probe-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction, left: String? = nil) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, context: .init(leftSideContext: left), action: action))))
+        }
+        for (raw, left, expected) in [("asita.", "", "明日。"), ("asita,", "", "明日、"),
+                                       ("asita-", "", "明日ー"), ("[apple]", "", "「apple」"),
+                                       ("apple-.,", "明日", "apple-.,"), (".", "明日", "。"),
+                                       (".", "apple", "."), ("3.14", "", "3.14"),
+                                       ("https://example.com/a-b[x]", "", "https://example.com/a-b[x]")] {
+            var display = ""
+            var prefix = ""
+            for character in raw {
+                prefix.append(character)
+                let response = try await send(.key(.init(modifierFlags: [], characters: String(character),
+                    charactersIgnoringModifiers: String(character), keyCode: 0)), left: left)
+                #expect(response.autoMixed?.raw == prefix)
+                #expect(response.autoMixed?.status == .ready)
+                display = response.snapshot.markedText.elements.map(\.content).joined()
+            }
+            #expect(display == expected, "authored runtime case: \(raw)")
+            let commit = try #require(try await send(.commit).autoMixed?.commits.first)
+            #expect(commit.text == expected)
+            _ = try await send(.commitApplied(commit.commitID))
+        }
+        _ = try await send(.key(.init(modifierFlags: [], characters: "asita.", charactersIgnoringModifiers: "asita.", keyCode: 0)))
+        let restored = try await send(.key(.init(modifierFlags: [], characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", keyCode: 53)))
+        #expect(restored.snapshot.markedText.elements.map(\.content).joined() == "asita.")
+        let rawCommit = try #require(try await send(.commit).autoMixed?.commits.first)
+        #expect(rawCommit.text == "asita.")
+        _ = try await send(.commitApplied(rawCommit.commitID))
+        try await probe.close(session)
+    }
+
     @Test func installedHelperKeepsAppleAfterJapaneseCommit() async throws {
         let probe = MixedIMEProbe()
         let session = "installed-apple-probe-" + UUID().uuidString

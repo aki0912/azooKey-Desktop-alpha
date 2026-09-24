@@ -89,7 +89,8 @@ private final class PlaygroundState: ObservableObject {
                                                  context: context, focus: focus),
             converter: MixedSessionConverter(bridge: bridge, sessionID: focus,
                                              leftContext: useContext ? String(committed.suffix(30)) : nil,
-                                             allowJapaneseReadingFallback: true)
+                                             allowJapaneseReadingFallback: true),
+            punctuation: MixedPunctuationPolicy(leftContext: context)
         )
     }
 

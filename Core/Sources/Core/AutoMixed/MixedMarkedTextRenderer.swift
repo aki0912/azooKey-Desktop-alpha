@@ -85,10 +85,12 @@ public enum MixedMarkedTextRenderer {
         raw: String,
         spans: [MixedSpan],
         candidates: [UUID: MixedCandidate] = [:],
-        rawPreview: Bool = false
+        rawPreview: Bool = false,
+        punctuation: MixedPunctuationPolicy? = nil
     ) throws -> MixedMarkedText {
         let source = TextOffsetMap(raw)
         try validate(spans: spans, source: source)
+        let literals = try rawPreview ? [:] : punctuation?.displaySlices(raw: raw, spans: spans) ?? [:]
         var text = ""
         var runs: [MixedDisplayRun] = []
         for span in spans {
@@ -99,7 +101,7 @@ public enum MixedMarkedTextRenderer {
                     throw AutoMixedError.invalidCandidate
                 }
             }
-            let content = try candidate?.text ?? source.slice(span.sourceRange)
+            let content = try candidate?.text ?? literals[span.id] ?? source.slice(span.sourceRange)
             let displayRange = try UTF16Range(location: text.utf16.count, length: content.utf16.count)
             text += content
             runs.append(MixedDisplayRun(span: span, displayRange: displayRange, isAtomic: candidate != nil))

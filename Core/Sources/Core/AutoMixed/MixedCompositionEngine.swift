@@ -14,14 +14,17 @@ import Foundation
 
     private let segmenter: any LanguageSegmenter
     private let converter: any JapaneseSpanConverting
+    private let punctuation: MixedPunctuationPolicy?
     private var candidates: [UUID: [MixedCandidate]] = [:]
     private var accepted: [UUID: MixedCandidate] = [:]
     private var selectingSpanID: UUID?
     private var selectionFromRawPreview = false
 
-    public init(segmenter: any LanguageSegmenter, converter: any JapaneseSpanConverting) {
+    public init(segmenter: any LanguageSegmenter, converter: any JapaneseSpanConverting,
+                punctuation: MixedPunctuationPolicy? = nil) {
         self.segmenter = segmenter
         self.converter = converter
+        self.punctuation = punctuation
     }
 
     /// Whole raw-field edits for the isolated playground; no IMK cursor mapping is implied.
@@ -56,7 +59,7 @@ import Foundation
         }
         return try MixedMarkedTextRenderer.render(
             raw: buffer.text, spans: spans, candidates: displayed,
-            rawPreview: state == .rawPreview || selectionFromRawPreview
+            rawPreview: state == .rawPreview || selectionFromRawPreview, punctuation: punctuation
         )
     }
 
@@ -135,6 +138,9 @@ import Foundation
         selectingSpanID = span.id
         if !selectionFromRawPreview, let options = candidates[span.id], !options.isEmpty {
             selectionOptions = options
+        } else if !selectionFromRawPreview,
+                  let literal = try punctuation?.displaySlices(raw: buffer.text, spans: spans)[span.id] {
+            selectionOptions = [MixedCandidate(token: "keep-display", text: literal)]
         } else {
             selectionOptions = [try MixedCandidate(token: "keep-raw", text: buffer.offsets.slice(span.sourceRange))]
         }
@@ -189,11 +195,12 @@ import Foundation
         converter.prepare(revision: revision, sourceScalarCount: buffer.offsets.scalarCount,
                           retaining: Set(spans.filter { $0.kind == .japaneseRoman }.map(\.id)))
         var updated: [UUID: [MixedCandidate]] = [:]
+        let literals = try punctuation?.displaySlices(raw: buffer.text, spans: spans) ?? [:]
         var leftDisplay = ""
         for span in spans {
             let raw = try buffer.offsets.slice(span.sourceRange)
             guard span.kind == .japaneseRoman || span.kind == .japaneseKana else {
-                leftDisplay += raw
+                leftDisplay += literals[span.id] ?? raw
                 continue
             }
             if let chosen = accepted[span.id] {
