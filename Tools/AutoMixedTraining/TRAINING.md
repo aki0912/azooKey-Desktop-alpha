@@ -1,6 +1,6 @@
 # ローカル学習パイプラインの準備
 
-`pipeline.py` に6つのCLIを実装した。原本と権利確認資料を検証し、元文groupの分割を固定した後でローマ字variantとprefixを増やす。CPUでLRを学習し、別のcalibration区画でsigmoid校正を行い、Swift用JSONと検証用parityを書き出す。
+`pipeline.py` に7つのCLIを実装した。原本と権利確認資料を検証し、元文groupの分割を固定した後でローマ字variantとprefixを増やす。CPUでLRを学習し、別のcalibration区画でsigmoid校正を行い、Swift用JSONと検証用parityを書き出す。
 
 2026-09-24に旧50原文へCodex作成650件を追加し、計700原文でv1/v2のLR学習・校正・exportを完了した。品質基準は未達で、T3全体は未完了、自動モードはOFFのまま。追加650件の人手確認も未実施。必要なデータ量と確認箇所は [DATA_PLAN.md](synthetic_expansion/DATA_PLAN.md)、結果の見方は [ローカルUI](REVIEW_UI.md) を参照。fixtureは引き続き `kind=fixture` として隔離する。
 
@@ -92,6 +92,7 @@ PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
 | `build-dataset --manifest <manifest.json> --output <dataset.json>` | 権利検証、group分割、variant/prefix、実Swift検証、sealed dataset |
 | `train --config <config.json> --data <dataset.json> --output <fitted.json>` | trainだけで語彙と係数を作る。Cはdevのlog lossで選択 |
 | `calibrate --model <fitted.json> --data <dataset.json> --output <calibrated.json>` | calibrationの原本だけでsigmoidをfit。decoderと採用閾値はdevで選ぶ |
+| `tune-thresholds --model <calibrated.json> --data <dataset.json> --config <config.json> --output <retuned.json>` | 係数・校正値を固定してdevで採用閾値を再探索。test採点はしない |
 | `export --model <calibrated.json> --output <new-directory>` | model.json、manifest.json、固定自作例のparity.jsonを書き出す |
 | `evaluate --model <calibrated.json> --test <dataset.json> --traces --output <report.json>` | sealed datasetのtest原本だけを評価。追加の学習・閾値選択なし |
 
@@ -102,6 +103,8 @@ PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
 校正は正例JA_ROMAN=1に対する `sigmoid(a*z+c)`。校正用LRは正則化なし。逆向きの係数になった場合や片方のclassが不足する場合は失敗させる。最低件数はfixtureで各class 2位置、approvedで100位置としている。100は品質保証の基準ではなく、極小の校正を拒否する入口。optimizerの非収束も成功扱いにしない。
 
 devでは英語span破壊率0.5%以下の候補からJA recallを優先する。該当候補がなければ破壊率が最小の候補を診断用に残す。これを合格モデルとは扱わない。設定と選択結果をmanifestに記録する。v1とv2では利用できる保留条件が異なるため、今回のsmoke結果を同条件の品質比較として使わない。実比較では候補条件を揃えたablationが必要。
+
+新しい学習設定version 2は文脈あり／なしの閾値を独立したグリッドで探索する。旧設定version 1の加算方式は再現用に保持。モデルschemaは不変で、語彙・係数・校正を固定した再探索も可能。全候補と目標未達を保存する。[探索条件・実測結果・再現手順](THRESHOLD_SEARCH.md) を参照。
 
 ## 評価と残る作業
 

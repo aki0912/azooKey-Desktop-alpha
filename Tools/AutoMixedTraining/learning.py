@@ -85,31 +85,60 @@ def fit_lr(x, y, weights, strength, config):
 
 
 def validate_config(config):
+    require(isinstance(config, dict) and type(config.get("schema_version")) is int
+            and config["schema_version"] in (1, 2), "unknown training config")
+    context_field = "missing_context_increment" if config["schema_version"] == 1 else "enter_ja_without_context_grid"
     fields(config, ("schema_version", "seed", "feature_spec_version", "vocabulary_max_features", "logistic_C_grid",
                     "max_iter", "tolerance", "switch_penalty_grid", "enter_ja_grid", "hold_ja",
-                    "missing_context_increment", "minimum_ja", "minimum_path_margin"))
-    require(type(config["schema_version"]) is int and config["schema_version"] == 1
-            and config["feature_spec_version"] in VERSIONS, "unknown training config")
+                    context_field, "minimum_ja", "minimum_path_margin"))
+    require(config["feature_spec_version"] in VERSIONS, "unknown feature specification")
     integer(config["seed"], 0, 2**32 - 1)
     integer(config["vocabulary_max_features"], 1, 32768)
     integer(config["max_iter"], 1, 10000)
     number(config["tolerance"], 1e-12, 1e-3)
-    for key, low, high in (("logistic_C_grid", 1e-6, 1e6), ("switch_penalty_grid", 0, 100), ("enter_ja_grid", 0, 1)):
+    grids = [("logistic_C_grid", 1e-6, 1e6), ("switch_penalty_grid", 0, 100), ("enter_ja_grid", 0, 1)]
+    if config["schema_version"] == 2:
+        grids.append(("enter_ja_without_context_grid", 0, 1))
+    for key, low, high in grids:
         require(isinstance(config[key], list) and 1 <= len(config[key]) <= 10, "invalid parameter grid")
         for value in config[key]:
             number(value, low, high)
-    for key in ("hold_ja", "missing_context_increment", "minimum_ja"):
+            if config["schema_version"] == 2 and key.startswith("enter_ja"):
+                require(value < 1, "entry search thresholds must be below one")
+    for key in ("hold_ja", "minimum_ja"):
         number(config[key], 0, 1)
+    if config["schema_version"] == 1:
+        number(config["missing_context_increment"], 0, 1)
+    elif config["feature_spec_version"] == VERSIONS[1]:
+        require(min(config["enter_ja_grid"]) <= max(config["enter_ja_without_context_grid"]),
+                "no valid context threshold pair")
     number(config["minimum_path_margin"], 0, 10000)
     require(config["hold_ja"] <= min(config["enter_ja_grid"]), "hold threshold exceeds entry threshold")
 
 
-def model_thresholds(config, enter):
+def model_thresholds(config, enter, without_context=None):
     result = dict(enter_ja=enter, hold_ja=config["hold_ja"])
     if config["feature_spec_version"] == VERSIONS[1]:
-        result.update(enter_ja_without_context=min(1, enter + config["missing_context_increment"]),
+        if config["schema_version"] == 1:
+            without_context = min(1, enter + config["missing_context_increment"])
+        else:
+            require(without_context is not None and enter <= without_context < 1,
+                    "independent context thresholds require an ordered pair below one")
+        result.update(enter_ja_without_context=without_context,
                       minimum_ja=config["minimum_ja"], minimum_path_margin=config["minimum_path_margin"])
     return result
+
+
+def threshold_candidates(config):
+    """Keep legacy replay intact; new searches use the constrained Cartesian product."""
+    validate_config(config)
+    for enter in sorted(set(config["enter_ja_grid"])):
+        if config["schema_version"] == 1 or config["feature_spec_version"] == VERSIONS[0]:
+            yield model_thresholds(config, enter)
+        else:
+            for without in sorted(set(config["enter_ja_without_context_grid"])):
+                if enter <= without:
+                    yield model_thresholds(config, enter, without)
 
 
 def validate_model(model):
@@ -175,7 +204,8 @@ def train(data, config):
                  model_version="offline-candidate-" + fingerprint(manifest)[:16], positive_label="JA_ROMAN",
                  vocabulary=vocab, coefficients=estimator.coef_[0].tolist(), intercept=float(estimator.intercept_[0]),
                  calibration=dict(a=1.0, c=0.0), decoder=dict(switch_penalty=config["switch_penalty_grid"][0]),
-                 thresholds=model_thresholds(config, config["enter_ja_grid"][0]), training_manifest_sha256=fingerprint(manifest))
+                 thresholds=(model_thresholds(config, config["enter_ja_grid"][0]) if config["schema_version"] == 1
+                             else next(threshold_candidates(config))), training_manifest_sha256=fingerprint(manifest))
     validate_model(model)
     return seal(dict(schema_version=1, phase="fitted", mode=data["mode"], dataset_sha256=data["dataset_sha256"],
                      model=model, training_manifest=manifest,
@@ -233,13 +263,14 @@ def decode(model, record, protection, scores):
     return decoded
 
 
-def metrics(model, rows):
+def metrics(model, rows, *, precomputed_scores=None):
+    require(precomputed_scores is None or len(precomputed_scores) == len(rows), "score cache length mismatch")
     counts = Counter()
     squared, nll = 0.0, 0.0
     bins = [dict(count=0, sum_p=0.0, sum_y=0) for _ in range(10)]
-    for row in rows:
+    for row_index, row in enumerate(rows):
         record = row["record"]
-        scores = score_record(model, record)
+        scores = score_record(model, record) if precomputed_scores is None else precomputed_scores[row_index]
         path = decode(model, record, row["protections"], scores)
         expected = labels(record)
         for i, y in positions(record):
@@ -281,6 +312,56 @@ def metrics(model, rows):
                 reliability=[dict(count=b["count"], mean_probability=ratio(b["sum_p"], b["count"]), observed_ja=ratio(b["sum_y"], b["count"])) for b in bins])
 
 
+DEV_TARGETS = dict(english_span_damage_rate_max=.005, ja_recall_min=.90,
+                   ja_precision_min=.98, boundary_f1_min=.90)
+
+
+def unmet_dev_targets(report):
+    # A diagnostic check against existing specification targets, never release approval.
+    return [name for name, threshold in DEV_TARGETS.items()
+            if report[name.rsplit("_", 1)[0]] is None
+            or (report[name.rsplit("_", 1)[0]] > threshold if name.endswith("_max")
+                else report[name.rsplit("_", 1)[0]] < threshold)]
+
+
+def select_decision_thresholds(model, data, config):
+    validate_config(config)
+    require(config["feature_spec_version"] == model["feature_spec_version"], "threshold feature version mismatch")
+    candidate = copy.deepcopy(model)
+    dev = rows_for(data, "dev", True)
+    # Scores and calibration are fixed during this search. No raw/context is persisted.
+    scores = [score_record(model, row["record"]) for row in dev]
+    trials = []
+    for penalty in sorted(set(config["switch_penalty_grid"])):
+        for thresholds in threshold_candidates(config):
+            candidate["decoder"]["switch_penalty"] = penalty
+            candidate["thresholds"] = thresholds
+            report = metrics(candidate, dev, precomputed_scores=scores)
+            damage, recall = report["english_span_damage_rate"], report["ja_recall"]
+            require(damage is not None and recall is not None, "dev requires English spans and JA positions")
+            trials.append(dict(decoder=dict(candidate["decoder"]), thresholds=thresholds, metrics=report,
+                               unmet_dev_targets=unmet_dev_targets(report)))
+    def rank(trial):
+        damage, recall = trial["metrics"]["english_span_damage_rate"], trial["metrics"]["ja_recall"]
+        # Preserve the existing English constraint / recall objective and legacy tie order.
+        return (damage > .005, -recall if damage <= .005 else damage, damage,
+                trial["decoder"]["switch_penalty"], trial["thresholds"]["enter_ja"],
+                trial["thresholds"].get("enter_ja_without_context", 0))
+    selected = min(range(len(trials)), key=lambda i: rank(trials[i]))
+    best = trials[selected]
+    candidate["decoder"], candidate["thresholds"] = best["decoder"], best["thresholds"]
+    by_context = {}
+    for state, available in (("available", True), ("unavailable", False)):
+        indices = [i for i, row in enumerate(dev) if (record_context(row["record"]) is not None) == available]
+        subset = [dev[i] for i in indices]
+        by_context[state] = dict(originals=len(subset), metrics=metrics(candidate, subset,
+                                precomputed_scores=[scores[i] for i in indices]))
+    return dict(partition="dev", originals=len(dev), targets=dict(DEV_TARGETS), selected_index=selected,
+                selected=best, by_context=by_context, trials=trials,
+                target_passing_candidates=sum(not t["unmet_dev_targets"] for t in trials),
+                selected_meets_dev_targets=not best["unmet_dev_targets"], quality_claim=False)
+
+
 def calibrate(checkpoint, data):
     require(checkpoint["phase"] == "fitted", "calibration requires an uncalibrated checkpoint")
     result = copy.deepcopy(checkpoint)
@@ -296,27 +377,45 @@ def calibrate(checkpoint, data):
     model["calibration"] = dict(a=float(calibrator.coef_[0][0]), c=float(calibrator.intercept_[0]))
     # Learned sigmoid sign is exported directly as sigmoid(a*z+c), with no private sklearn attributes.
     require(model["calibration"]["a"] > 0, "calibration reversed positive-label direction; inspect data")
-    trials = []
-    dev = rows_for(data, "dev", True)
-    for penalty in sorted(set(config["switch_penalty_grid"])):
-        for enter in sorted(set(config["enter_ja_grid"])):
-            model["decoder"]["switch_penalty"] = penalty
-            model["thresholds"] = model_thresholds(config, enter)
-            report = metrics(model, dev)
-            damage = report["english_span_damage_rate"]
-            recall = report["ja_recall"]
-            require(damage is not None and recall is not None, "dev requires English spans and JA positions")
-            trials.append((damage > .005, -recall if damage <= .005 else damage, damage, penalty, enter, report))
-    best = min(trials, key=lambda t: t[:5])
-    model["decoder"]["switch_penalty"] = best[3]
-    model["thresholds"] = model_thresholds(config, best[4])
+    search = select_decision_thresholds(model, data, config)
+    best = search["selected"]
+    model["decoder"], model["thresholds"] = best["decoder"], best["thresholds"]
     result["phase"] = "calibrated"
     result["calibration_report"] = dict(partition="calibration", positions=len(y), regularization="none",
-                                        decoder_selection_partition="dev", selected_dev_metrics=best[5],
+                                        decoder_selection_partition="dev", selected_dev_metrics=best["metrics"],
+                                        threshold_search=search,
                                         quality_claim=False)
     result["training_manifest"]["calibration"] = dict(parameters=model["calibration"], decoder=model["decoder"], thresholds=model["thresholds"])
     model["training_manifest_sha256"] = fingerprint(result["training_manifest"])
     validate_model(model)
+    return seal(result)
+
+
+def tune_thresholds(checkpoint, data, config):
+    """Search a frozen calibrated checkpoint without refitting or evaluating test."""
+    require(checkpoint["phase"] == "calibrated", "threshold tuning requires a calibrated checkpoint")
+    require(checkpoint["dataset_sha256"] == data["dataset_sha256"] and checkpoint["mode"] == data["mode"],
+            "checkpoint belongs to a different dataset/mode")
+    validate_config(config)
+    require(config["schema_version"] == 2, "independent threshold tuning requires config version two")
+    previous = checkpoint["training_manifest"].get("threshold_tuning", {}).get(
+        "config", checkpoint["training_manifest"]["config"])
+    changed_fields = {"schema_version", "missing_context_increment", "enter_ja_grid", "enter_ja_without_context_grid"}
+    require({k: v for k, v in config.items() if k not in changed_fields}
+            == {k: v for k, v in previous.items() if k not in changed_fields},
+            "threshold-only tuning cannot change fit, calibration, or other decision settings")
+    result = copy.deepcopy(checkpoint)
+    search = select_decision_thresholds(result["model"], data, config)
+    result["model"].update(decoder=search["selected"]["decoder"], thresholds=search["selected"]["thresholds"])
+    result["threshold_tuning_report"] = search
+    result["training_manifest"]["threshold_tuning"] = dict(parent_checkpoint_sha256=checkpoint["checkpoint_sha256"],
+        config=copy.deepcopy(config), environment=environment(), selection_partition="dev",
+        fixed_parameters=["vocabulary", "coefficients", "intercept", "calibration"],
+        decoder=result["model"]["decoder"], thresholds=result["model"]["thresholds"])
+    result["model"]["training_manifest_sha256"] = fingerprint(result["training_manifest"])
+    result["model"]["model_version"] = "offline-retuned-" + result["model"]["training_manifest_sha256"][:16]
+    result["release_ready"] = False
+    validate_model(result["model"])
     return seal(result)
 
 

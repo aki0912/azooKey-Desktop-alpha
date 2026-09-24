@@ -7,7 +7,8 @@ import sys
 import subprocess
 
 from dataset import build_dataset, load_dataset, load_sources, validate_records
-from learning import (VERSIONS, calibrate, decode, evaluate, features, load_checkpoint, score_record, train, validate_model, viterbi)
+from learning import (VERSIONS, calibrate, decode, evaluate, features, load_checkpoint, score_record, train,
+                      tune_thresholds, validate_model, viterbi)
 from pipeline_io import HERE, ROOT, PipelineError, digest, environment, fingerprint, parse, read, require, write_new
 
 
@@ -78,6 +79,11 @@ def parser():
     calibration.add_argument("--model", required=True, type=Path, help="fitted checkpoint")
     calibration.add_argument("--data", required=True, type=Path)
     calibration.add_argument("--output", required=True, type=Path)
+    tuning = commands.add_parser("tune-thresholds", help="search independent entry thresholds on dev; freeze LR and calibration")
+    tuning.add_argument("--model", required=True, type=Path, help="calibrated checkpoint")
+    tuning.add_argument("--data", required=True, type=Path, help="same sealed dataset")
+    tuning.add_argument("--config", required=True, type=Path, help="version 2 config; only entry grids may change")
+    tuning.add_argument("--output", required=True, type=Path)
     exporting = commands.add_parser("export", help="export immutable runtime JSON plus manifest and parity")
     exporting.add_argument("--model", required=True, type=Path, help="calibrated checkpoint")
     exporting.add_argument("--output", required=True, type=Path)
@@ -119,6 +125,14 @@ def main(argv=None):
             data = load_dataset(args.data)
             write_new(args.output, calibrate(load_checkpoint(args.model, data), data))
             print('{"status":"calibrated","release_ready":false}')
+        elif args.command == "tune-thresholds":
+            require(not args.output.exists(), "threshold tuning output already exists")
+            data = load_dataset(args.data)
+            checkpoint = tune_thresholds(load_checkpoint(args.model, data), data, read(args.config))
+            write_new(args.output, checkpoint)
+            search = checkpoint["threshold_tuning_report"]
+            print(json.dumps(dict(status="thresholds_tuned", candidates=len(search["trials"]),
+                                  target_passing_candidates=search["target_passing_candidates"], release_ready=False)))
         elif args.command == "export":
             export(load_checkpoint(args.model), args.output)
             print('{"status":"exported","release_ready":false}')
