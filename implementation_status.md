@@ -660,3 +660,108 @@ v2・C=1.0を固定した別の診断では、入れ子のtrain成分だけを�
 環境は既存のmacOS 27.0 arm64／Swift 6.4／Python 3.11.9と固定requirements.lock。HTTP回帰のためローカル待受けを許可して実行。外部データ・追加依存は取得していない。testの新規採点、prefix replay、実機IME、Zenzai、XPC/IMK、速度・RSS、アプリ全体のビルドは未実行。探索での文脈性能は小標本のまま。機能フラグOFF、release_ready=false、T3全体は未完了。IMEのインストール・削除・登録・設定変更は行っていない。
 
 次は、混在境界での英語誤分類と日本語の見逃しをdevで分析し、人手確認済みの原文・文脈対照を補う。今回の候補は比較用として保存し、品質評価には十分な未閲覧testを別途準備する。実Zenzai統合はT4として分離する。
+
+## 現在の学習済み候補を使ったT4接続と試用アプリ（2026-09-24）
+
+利用者の「精度改善は動くようになってから」という方針に従い、追加学習・データ拡充・閾値変更を止め、T4へ進んだ。T3の品質gateを合格扱いにしたわけではない。通常IMEの機能フラグはOFFのまま。開始HEADは `c64a6fea8fa562a8ff0154be6df8aa7cd2f66c9a`、開始時git statusはcleanだった。
+
+### 使用モデルと実API
+
+判定器は `build/auto-mixed/independent-thresholds-refined-20260924/export/model.json`、schema 2／anchored-context-v2／`offline-retuned-302c6220b7f569e5`。SHA-256は `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581`。文脈あり0.90／なし0.98、minimum_ja 0.55、margin 1.2、hold 0.65、switch 0を維持した。v1/v2の特徴量、LR、Viterbi、golden、元データ、split、学習済み重みは変更していない。
+
+固定依存のcheckout HEADは `ad714fea8cb2fe113aea86ba5c42563cdaf77cfb` で仕様と一致。`createSession`、`removeSession`、同期的な `withSession`、`requestCandidates`、`ComposingText.insertAtCursorPosition`、`inputIndexToSurfaceIndexMap`、`prefixComplete` の定義を再確認した。index mapの単位は入力要素とsurfaceのCharacterであり、汎用scalar mapではない。
+
+`ZenzaiSpanBridge`、`JapaneseSpanRequest/Result`、`SegmentsManager.replaceCompositionFromRaw` は今回の新設API。既存APIとは区別する。XPCのwire型、dispatch、IMKクライアント、manualのキー経路は変更していない。
+
+### 実装した範囲と仕様差分
+
+- 共有Converterに対して、入力session／composition／spanごとにchild sessionを管理するbridgeを追加した。全操作はMainActor上の同期処理。最大32 child、消えたspan・取消・確定・session終了で解放し、上限超過は原文保持する。bridge内部で巨大モデルを作り直さない。
+- `SegmentsManager` に原文prefixを一括置換し、候補要求を1回だけ行う入口を追加した。既存のoptions・動的辞書・資源解決を同じmanager内部で利用する。manual側の既定引数と設定値は維持し、mixedだけ予測候補を無効にした。候補はコピーしたComposingTextへ実際の `ComposingCount` を適用し、全量を消費するものに絞る。
+- 標準 `.roman2kana` の実ComposingTextで妥当性を確認する。ASCIIローマ字に限定したときだけ入力要素数とscalar数を対応させる。独立した変換境界までをprefixとし、`n`、`nsh`、`kk` など依存の残る末尾は元のrawで残す。内部区間に未完suffixが残ればrun全体をunresolvedへ戻す。
+- **公開APIの制約**：依存は未完prefixの一覧を公開していない。末尾に未変換文字が残るときは、実ComposingTextに英字またはapostropheを1キー足して全量かなになるかを最大27通りで確認する。確認できないケースは原文へ退避する。独自ローマ字表、特徴量への未来情報、Zenzaiによるsubstring探索は使わない。この保守的な検査が将来の入力表で拾えないケースは、依存の公開API追加として扱う。
+- キャッシュはraw・左右文脈・range・設定version・richを含むメモリ内だけ。設定version変更でuser dictionary／personalization設定を読み直す。前方の表示を後方の文脈へ渡し、採用済み候補を維持する。標準入力表と資源はbridge生成時に固定するため、それらの変更時はbridgeを作り直す。
+- previewでは学習APIを呼ばない。サーバー側のopaque tokenだけで実Candidateを参照する明示的な学習入口を別に設け、取消後・更新後・他sessionのtoken・重複ackを拒否する。T5のOS commit ack／pending領域は未接続。試用アプリは確定しても学習OFFで、全childを解放する。
+- **段階的なUI**：登録不要で試せる `AutoMixedPlayground` をmacOS専用productとして追加した。T1エンジンへ現在の判定器とT4 bridgeを注入し、原文欄、混在表示、候補ボタン、Enter確定、Escape原文化、任意の左文脈を動かす。通常IMEへの接続はT5に残す。Tabはこのウィンドウではフォーカス移動で、候補操作はボタンを使う。漢字表示上の編集mappingもT6に残し、現在の変換runはsuffix込みでatomicに扱う。
+- 左文脈はこの画面で確定した文章から明示的に有効にした場合だけ利用する。判定は末尾30 scalar、既存Converterは30 Character上限。rawは最大256 scalar。入力・候補・文脈は永続化しない。依存に入力をprintする経路があるため、試用プロセスのstdout／stderrを起動直後に破棄し、問題は画面に表示する。
+
+### 依頼に基づく資源の取得
+
+当初GGUF／base_n5_lmのsubmoduleは空だった。追加依頼「辞書はさがしてダウンロードして」に従い、`.gitmodules` とHEADのgitlinkに対応するHugging Faceの配布元を確認し、固定revisionのGGUFと4個のmarisaを取得した。計 **118,509,944 bytes**。5ファイルとも配布APIのLFS SHA-256と一致する。
+
+取得先は `build/auto-mixed/runtime-resources/`。URL・revision・サイズ・checksumは `receipt.json` に保存した。取得・再検証スクリプトは `Tools/fetch_auto_mixed_resources.py`。既存ファイルが不一致なら上書きせず停止する。submoduleや利用中のIMEの配置は変更していない。
+
+GGUFは [Miwa-Keita/zenz-v3.2-small-gguf](https://huggingface.co/Miwa-Keita/zenz-v3.2-small-gguf/tree/c67e03e07d215c869f591b274c1631170d3e11fe) のQ5_K_M、配布ページはApache-2.0を表示。補助ngramは [base_n5_lm](https://huggingface.co/Miwa-Keita/base_n5_lm/tree/160a305a89c033ac53a674baeac4470cf531a71b)。後者の固定revisionにはLICENSE／モデルカードがなく、再配布権利は未確認。今回のローカル検証用取得と、T8の再配布判断は分ける。学習コーパスへの追加や追加学習は行っていない。補助ngramは取得とchecksum確認のみで、個人ngramを使ったパーソナライズ推論は未実行。
+
+### 実行した検証と失敗
+
+| 検証 | 結果 |
+|---|---|
+| Core全体、native方式 | **124件中120件成功、4件skip、13 suite**。既存manualの候補／編集／XPC契約を含む。実行4.501秒。`t4-core-final.log` |
+| pure Core＋fresh Python v1/v2＋学習済み／fixture export parity | **43件／9 suite成功、skipなし**。旧goldenを維持、数値許容差1e-12を維持。1.921秒。`t4-parity-final.log` |
+| 実Zenzai、ホストGPU | **専用1件成功、0.571秒**。2入力session×2JA spanを交互に扱い、キャッシュを明示的に無効化して逆順に再計算しても候補一致。未完nのsource範囲と原文suffixも確認。`t4-zenzai-final.log` |
+| モデル共有 | 上記専用プロセスの8回の実候補要求で `Loaded model` は **1回**。重み読込の増加なし。同時childは4、session単位の解放後は0 |
+| previewと学習 | 学習ONの既存設定を変更せず一時ディレクトリで試験。preview・取消・flushでは学習ファイルが不変。明示ackで更新されるpositive controlと、重複ack拒否後に不変なことを確認 |
+| 子session・cache | 32上限、解放、他session／古いtoken拒否、raw・左右文脈・設定変更、未完内部区間のraw退避を実辞書で確認 |
+| 試用アプリ | Release build、開発用.app生成、Info.plist検証、起動成功。`t4-playground-final.log`。UIの実操作も確認（下記） |
+| 資源／静的確認 | 5ファイルのサイズ・SHA-256再検証成功。shell構文と `git diff --check` 成功 |
+
+Core全体のskip 4件はoffline dataset bridge、fixture export、approved export、実Zenzaiの環境指定テスト。export 2件は別のpure parity実行、実ZenzaiはホストGPUの専用実行で成功した。offline dataset bridgeは学習データ変更がないため今回は未実行。従来どおりユーザー設定を書き換える `testOptionPunctuationMappings` は別途除外した。
+
+途中の失敗も残した。
+
+- 初回コンパイルはSwiftUIのcatch内で `error` がshadowされる2か所で失敗。`self.error` に修正した。`t4-bridge-first.log`。
+- 最初の実テストは3 assertion失敗。固定依存では `konnichiha` が `こんいちは`、`konnnichiha` が `こんにちは` になることを実APIで確認し、両方を回帰例にした。独自のかな変換へ差し替えていない。また `watashiha sushi wotaberu ...` は現在のモデルが全JA候補を保留し、変換されない。これを原文保持の回帰例として残し、変換接続のpositive例には現在のモデルがJAとする `kyouha ...` を追加した。閾値・goldenの期待値を緩めていない。`t4-bridge-second.log`。
+- sandbox内の実Zenzai試験はMetalが0MiBと報告され、GGUF読込に失敗した。辞書fallbackを成功扱いせず、backend失敗／raw保持として扱う。ホストGPUへ実行範囲を広げた専用テストは成功した。初回ホスト実行11.921秒はMetal kernel初期化を含む。`t4-bridge-third.log`、`t4-zenzai-host.log`。
+- ネットワーク制限内では配布元の名前解決に失敗したため、依頼された固定資源取得だけを外側で実行し、checksum確認まで完了した。
+- 当初MacがロックされていたためUI操作を中断。利用者の解除後に再開した。実行ファイル単体は画面操作ツールがアプリとして認識しなかったため、独立bundle IDの開発用.appを生成する形にした。通常IMEの識別子・登録は変えていない。
+- SwiftUIの動的な表示文字列がAX情報では古いままになる問題を実画面で発見し、表示のidentityを更新して修正した。修正後のAXにも `APIを使う` とモデル読込済みが反映されることを確認した。
+- LaunchServices経由の再起動でdyldのopen待ちが発生した。入力前の専用プロセスのstackを確認して終了した。`open -n` で成功した試行もあったが、最終ビルドで再発したため、起動スクリプトは.app内の実行ファイルを直接起動する方式に変更した。直接起動した最終ビルドで、Zenzai読込と `APIwotukau` → `APIを使う` を再確認した。LaunchServices経路の原因は未特定で、解消済みとは扱わない。`t4-playground-startup-sample.txt`。実行中バイナリを上書きしないよう、packagingはatomic置換にした。
+
+実画面では `APIwotukau` → `APIを使う`、別候補 `をつかう` の採用、Enterで1回だけ確定欄へ追加、任意文脈の切替、Escape原文化、連続空白・絵文字・URLを含む原文確定、保留例の原文表示、257 scalarの入力拒否時に前の原文を保持することを確認した。toolのtypeTextで絵文字が入らなかった試行は成功に含めず、pasteで原文欄に絵文字が入ったことを確認してから確定を検証した。テスト入力はこのタスクで用意した例文だけ。実際のユーザー文脈は収集していない。
+
+### 残る作業
+
+T4のbridgeに必要な実Converter、複数child、共有モデル、preview非学習の検証は通過した。次は **T5のXPC／IMK統合**。auto専用dispatch、capability、mixed snapshot、commitID／ack、未ack候補の保持上限、重複effect防止、フォーカス拘束、OSのcommit／stop／deactivateの順序を実装する。試用ウィンドウの確定はローカルな表示更新で、他アプリへのIME入力ではない。
+
+T3の精度改善と独立test、T6の編集／表示安定化、T7の入力追従・ログ監査・アプリ別試験、T8の権利／署名／配布確認は未完了。今回のGPUテスト時間を入力レイテンシとして報告しない。通常IMEの完全なXcode build、Linux、SwiftLint（未導入）は未実行。既存のSwiftPM署名問題を解消したわけではなく、native方式を継続した。macOS 13指定とllamaの13.3最低version差などの既存警告は残る。
+
+起動・操作手順は [Tools/AUTO_MIXED_PLAYGROUND.md](Tools/AUTO_MIXED_PLAYGROUND.md)。既存のIMEのインストール・削除・登録変更、LaunchAgent変更、ユーザー設定変更は行っていない。
+
+## 未完ローマ字の末尾表示を維持する小差分（2026-09-24）
+
+利用者が報告した `asita → 明日`、`asitan → asitan`、`asitano → 明日の` の揺れに対応した。希望例中の `assitan` は最初の説明にある `asitan` と同じ意図と解釈し、その前提を伝えた。余分なsを消して `assitan` を明日にする綴り修正は実装していない。
+
+開始HEADは引き続き `c64a6fea8fa562a8ff0154be6df8aa7cd2f66c9a`。git statusには前節T4の未コミット変更があり、すべて保持した。今回の実装変更は `Core/Sources/Core/InputUtils/AutoMixed/TrainedMixedInput.swift`、新規回帰は `Core/Tests/CoreTests/InputUtilsTests/PendingRomanTailTests.swift`。操作説明と `docs/azookey_auto_mixed_codex/docs/04_MODEL_AND_DATA.md` §3.2にも追記した。
+
+### 原因と採用条件
+
+現在のモデルでは `asita` の全位置平均は約0.9962、`asitan` は約0.9735。末尾nのpは約0.8610で、文脈なし採用閾値0.98に全体平均が届かなくなる。標準ローマ字APIとbridgeは既に `asita` ＋ `n` を扱えたが、判定器で全体を保留するためbridgeに届かなかった。これらの値は文字位置の指標であり、単語の正解確率ではない。
+
+試用adapterで、末尾のunresolved runに限って次を確認する。
+
+1. 実ComposingTextから非空の完成prefix＋有効な未完suffixを得られる。
+2. 現在のrawの当該run全位置で `p >= max(hold_ja, minimum_ja)`。現在のモデルでは0.65。RAWと保護済みの位置はこの経路へ入れない。
+3. suffixを除いたraw全体を、同じ左文脈で1回だけ再判定し、完成prefixと完全に同じ範囲が既存の採用閾値・最小値・marginを通る。
+
+この条件を満たせば元runをbridgeへ渡し、prefixだけを変換して元のsuffixを付ける。rawの文字・Unicode scalar範囲は変えない。貼り付けでも同じ判定を行い、前の漢字表示を無条件で引き継がない。`made/no/to/name` などの語別ルールは追加していない。
+
+**仕様差分と影響**：T6のうち末尾表示だけを先に実装した。一般的な表示履歴を使うhysteresisではなく、現在のrawで確認する限定的なprefix再判定である。既存のhold値を全位置の下限として使い、係数・閾値・schema・v1/v2特徴量・Viterbi・goldenは変更していない。判定器単体の評価指標と最終表示の採用規則は異なるため、前節までの精度を今回の表示規則の精度としては報告しない。追加LR再判定は最大1回で、Zenzaiのsubstring探索は追加していない。
+
+### 検証結果
+
+| 検証 | 結果 |
+|---|---|
+| Core回帰、native方式 | **130件中125件成功、5件skip、14 suite、5.278秒**。既存manual・固定v1/v2 golden・Python parityを含む。`build/auto-mixed/pending-tail-core.log` |
+| 追加した人工スコアの条件試験 | 未完n/k/sh/kk/nx、低信頼、hold値・minimum値・margin・文脈別採用閾値の変更、RAW境界、内部の未完子音、URL・email・識別子・ファイル名、絵文字・結合文字前方のscalar範囲を確認。fixtureは学習済み品質の根拠にしない |
+| 現在の学習済み判定器＋実辞書 | `明日 → 明日n → 明日の`、backspaceでの逆遷移、貼り付け、未完n込み確定、Escape原文復元、`asian` への置換時の子session解放を確認。`asian/ash/shin/names/making/design/tomorrow` 等の有限例でJA化しない回帰も通過 |
+| 実Zenzai、ホストGPU | 専用 **1件成功、0.545秒**。上記と同じ入力・編集・確定列を実GGUFで実行し、backendはzenzaiReady。未完nのsource範囲と全候補末尾nを確認。モデル読込は1回。`build/auto-mixed/pending-tail-zenzai.log` |
+| Release試用アプリ | build成功（12.88秒）、.appを再生成して直接起動。実画面で `asita` 入力後にn、oを1文字ずつ足し、`明日 → 明日n → 明日の` と原文欄の不変を確認。左文脈OFF。`build/auto-mixed/pending-tail-playground.log` |
+| 不変・静的検査 | モデルSHA-256は `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` のまま。`git diff --check` 成功 |
+
+全体試験のskipは既存offline dataset bridge、fixture export、approved export、既存Zenzai共有試験、今回のZenzai試験。今回のZenzai試験だけ別途ホストGPUで成功した。他4件は今回再実行しておらず、前節の結果と区別する。従来どおり設定を書き換える `testOptionPunctuationMappings` は明示的に除外した。
+
+途中の失敗は、最初のテストコンパイルでfixtureパス取得のtryが不足した1件（修正済み、`pending-tail-first.log`）、次の実行で新規テストの期待値が不正だった3 assertion（`pending-tail-second.log`）。後者は① `nx` が実入力表では次のa等で完成する有効な未完suffix、②末尾apostropheが既存保護器で別literalになる、③人工モデルでnをRAWにすると既存経路でasitaだけJAになる、という事実を確認した。①はprefix/suffixの正確な期待値を持つpositive例へ移し、②③は既存の正確なspan種別と③の範囲をassertする形にした。現在の学習済みモデルで `asitanx` を保留する期待値は維持し、既存テスト・採用閾値は弱めていない。
+
+環境はmacOS 27.0 arm64／Swift 6.4／Xcode 27。ホストGPUの専用実行は一時領域・学習OFF。試用アプリは入力／文脈を記録せず、テストログの入力はタスクで明示した例と人工fixtureだけ。通常IMEの機能フラグOFF、manual経路・XPC／IMKは今回変更していない。IMEのインストール・削除・登録・ユーザー設定変更、追加学習、外部データ取得は行っていない。
+
+未実行は広範な英語誤変換率・typing trace・入力遅延・実機IME／他アプリ・署名付きXcode全体build・SwiftLint。追加した有限の回帰例から一般的な判別精度は主張しない。LaunchServices起動問題の再調査も未実行で、既存の直接起動を継続した。T5接続を進める前提は維持し、T6全体とT7の品質・性能評価は未完了のまま。

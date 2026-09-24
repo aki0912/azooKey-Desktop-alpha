@@ -39,6 +39,15 @@ private struct MockSegmenter: LanguageSegmenter {
     var requests: [String] = []
     var fails = false
     var invalidCandidate = false
+    var leftDisplays: [String] = []
+    var finishedCount = 0
+
+    func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate] {
+        leftDisplays.append(leftDisplay)
+        return try candidates(for: raw, span: span)
+    }
+
+    func finishComposition() { finishedCount += 1 }
 
     func candidates(for raw: String, span: MixedSpan) throws -> [MixedCandidate] {
         requests.append(raw)
@@ -55,6 +64,22 @@ private struct MockSegmenter: LanguageSegmenter {
 }
 
 @Suite @MainActor struct MixedCompositionEngineTests {
+    @Test func wholeFieldEditingUsesAcceptedLeftDisplayAndReleasesOnCancel() throws {
+        let converter = MockConverter()
+        let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)
+        try engine.replaceRaw("ashita")
+        try engine.handle(.tab())
+        try engine.handle(.tab())
+        try engine.handle(.enter)
+        try engine.replaceRaw("ashita kyou")
+        #expect(try engine.markedText().text == "あした 今日")
+        #expect(converter.leftDisplays.last == "あした ")
+        engine.cancel()
+        #expect(converter.finishedCount == 1)
+        #expect(engine.buffer.isEmpty)
+        #expect(try engine.markedText().text.isEmpty)
+    }
+
     @Test func mixedRunsPreserveCaseSpacesAndSource() throws {
         let converter = MockConverter()
         let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)

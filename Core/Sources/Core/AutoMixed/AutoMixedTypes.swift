@@ -80,9 +80,20 @@ public protocol LanguageSegmenter {
 }
 
 /// Preview-only boundary. No learning or OS insertion is performed by the pure engine.
-/// The real session-aware Zenzai adapter and commit acknowledgement contract belong to T4/T5.
+/// T4's adapter owns child sessions; the IMK commit acknowledgement contract belongs to T5.
 @MainActor public protocol JapaneseSpanConverting {
     func candidates(for raw: String, span: MixedSpan) throws -> [MixedCandidate]
+    func prepare(revision: UInt64, sourceScalarCount: Int, retaining spanIDs: Set<UUID>)
+    func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate]
+    func finishComposition()
+}
+
+public extension JapaneseSpanConverting {
+    func prepare(revision: UInt64, sourceScalarCount: Int, retaining spanIDs: Set<UUID>) {}
+    func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate] {
+        try candidates(for: raw, span: span)
+    }
+    func finishComposition() {}
 }
 
 public enum MixedCompositionState: Sendable, Equatable {

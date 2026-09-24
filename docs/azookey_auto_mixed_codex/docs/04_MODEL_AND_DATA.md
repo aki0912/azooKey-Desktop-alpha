@@ -75,6 +75,17 @@ v1比較基準の初期値：新しくJA表示へ入るrunは平均p≥0.90、�
 
 閾値を上げるだけで全入力をrawにして「英語を壊さない精度」を達成しない。JA recallとcoverageを同時にrelease gateへ入れる。
 
+#### 試用アプリの未完末尾表示（2026-09-24追補）
+
+T4接続後の `asita → asitan` では、未完の `n` によってrun全体の平均が採用閾値を下回り、`明日` が原文表示へ戻る。利用者の希望により、試用アプリのadapterに次の限定的な再判定を追加する。T2/T3判定器の出力・golden・モデル重みは変更しない。
+
+1. 現在の判定が末尾のunresolved runで、既存入力表から非空の完成prefixと未完suffixを得られる場合だけ対象にする。RAW・保護範囲・内部の未完区間には適用しない。
+2. 現在のrawを使った当該runの**全位置**で、pが `max(hold_ja, minimum_ja)` 以上であることを要求する。現在の候補モデルでは0.65。平均0.65で保持する一般的なhysteresisより保守的な条件であり、前回の表示だけでは保持しない。
+3. 未完suffixを除いたraw全体を、同じ左文脈で1回だけ再判定する。完成prefixと完全に同じ範囲が、既存の文脈別採用閾値・最小値・path marginを満たすJA runであることを要求する。
+4. 元のrawと範囲は変更せず、bridgeで完成prefixの候補に元のsuffixを付ける。pasteでも同じ条件を使う。Zenzaiを全substringへ呼ぶ探索や綴りの自動修正は行わない。
+
+これはT6全体の前倒し完了ではなく、末尾表示だけの追加である。LR再判定は最大1回増える。学習時の特徴量や未来文字は追加しないが、最終表示の採用規則は従来の判定器単体とは異なるため、既存のモデル評価値をこの表示規則の精度として転用しない。英語の誤変換率と入力追従性能の広範な評価はT7に残す。検証結果は `implementation_status.md` を参照。
+
 ## 4. データ形式
 
 `schemas/span_record.schema.json` と `fixtures/span_cases.jsonl` を参照。rawは利用者が打つ文字列そのもの。区間offsetはUnicode scalar、end-exclusive。

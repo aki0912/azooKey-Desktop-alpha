@@ -1,7 +1,7 @@
 import Foundation
 
-/// An unconnected, synchronous core for T1. Neither the server nor the manual input path
-/// constructs it. Providers must be explicitly injected; there is no default test model.
+/// Synchronous composition core. The isolated playground opts in; the server and manual
+/// input path do not construct it. Providers must be injected; there is no default test model.
 @MainActor public final class MixedCompositionEngine {
     public private(set) var buffer = RawCompositionBuffer()
     public private(set) var spans: [MixedSpan] = []
@@ -21,6 +21,27 @@ import Foundation
     public init(segmenter: any LanguageSegmenter, converter: any JapaneseSpanConverting) {
         self.segmenter = segmenter
         self.converter = converter
+    }
+
+    /// Whole raw-field edits for the isolated playground; no IMK cursor mapping is implied.
+    public func replaceRaw(_ raw: String) throws {
+        revision &+= 1
+        try edit {
+            $0 = RawCompositionBuffer()
+            try $0.insert(raw)
+        }
+    }
+
+    public func cancel() {
+        converter.finishComposition()
+        buffer = RawCompositionBuffer()
+        spans = []
+        candidates = [:]
+        accepted = [:]
+        closeSelection()
+        state = .idle
+        usedRawFallback = false
+        revision &+= 1
     }
 
     public func markedText() throws -> MixedMarkedText {
@@ -74,8 +95,10 @@ import Foundation
                 }
                 state = selectionFromRawPreview ? .rawPreview : .composing
                 closeSelection()
+                if state == .composing { try refreshCandidates() }
             } else {
                 let commit = try MixedCommit(text: markedText().text, sourceScalarCount: buffer.offsets.scalarCount)
+                converter.finishComposition()
                 buffer = RawCompositionBuffer()
                 spans = []
                 candidates = [:]
@@ -119,11 +142,11 @@ import Foundation
     private func edit(_ operation: (inout RawCompositionBuffer) throws -> Void) throws {
         let oldBuffer = buffer
         let oldSpans = spans
-        let oldCandidates = candidates
         try operation(&buffer)
         closeSelection()
         usedRawFallback = false
         if buffer.isEmpty {
+            converter.finishComposition()
             spans = []
             candidates = [:]
             accepted = [:]
@@ -145,20 +168,9 @@ import Foundation
                 return span
             }
             accepted = accepted.filter { id, _ in spans.contains(where: { $0.id == id }) }
-            candidates = [:]
-            for span in spans where span.kind == .japaneseRoman {
-                if let chosen = accepted[span.id] {
-                    candidates[span.id] = oldCandidates[span.id] ?? [chosen]
-                } else {
-                    let options = try converter.candidates(for: buffer.offsets.slice(span.sourceRange), span: span)
-                    guard options.allSatisfy({ !$0.text.isEmpty && !$0.token.isEmpty }),
-                          Set(options.map(\.token)).count == options.count else {
-                        throw AutoMixedError.invalidCandidate
-                    }
-                    candidates[span.id] = options
-                }
-            }
+            try refreshCandidates()
         } catch {
+            converter.finishComposition()
             // Provider failure is reversible and cannot remove the original input.
             spans = [try MixedSpan(sourceRange: ScalarRange(0, buffer.offsets.scalarCount), kind: .unresolved)]
             candidates = [:]
@@ -166,5 +178,32 @@ import Foundation
             usedRawFallback = true
         }
         state = .composing
+    }
+
+    private func refreshCandidates() throws {
+        converter.prepare(revision: revision, sourceScalarCount: buffer.offsets.scalarCount,
+                          retaining: Set(spans.filter { $0.kind == .japaneseRoman }.map(\.id)))
+        var updated: [UUID: [MixedCandidate]] = [:]
+        var leftDisplay = ""
+        for span in spans {
+            let raw = try buffer.offsets.slice(span.sourceRange)
+            guard span.kind == .japaneseRoman else {
+                leftDisplay += raw
+                continue
+            }
+            if let chosen = accepted[span.id] {
+                updated[span.id] = candidates[span.id] ?? [chosen]
+                leftDisplay += chosen.text
+            } else {
+                let options = try converter.candidates(for: raw, span: span, leftDisplay: leftDisplay)
+                guard options.allSatisfy({ !$0.text.isEmpty && !$0.token.isEmpty }),
+                      Set(options.map(\.token)).count == options.count else {
+                    throw AutoMixedError.invalidCandidate
+                }
+                updated[span.id] = options
+                leftDisplay += options.first?.text ?? raw
+            }
+        }
+        candidates = updated
     }
 }

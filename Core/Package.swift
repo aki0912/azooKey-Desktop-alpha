@@ -54,6 +54,11 @@ products.append(
         targets: ["ConverterServer"]
     )
 )
+products.append(.executable(name: "AutoMixedPlayground", targets: ["AutoMixedPlayground"]))
+targets.append(.executableTarget(
+    name: "AutoMixedPlayground", dependencies: ["Core"],
+    swiftSettings: [.interoperabilityMode(.Cxx)]
+))
 targets.append(
     .executableTarget(
         name: "ConverterServer",
