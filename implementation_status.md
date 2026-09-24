@@ -855,3 +855,37 @@ T3の精度改善と独立test、T6の編集／表示安定化、T7の入力追�
 広範な英語誤変換率、辞書にない語・人名・製品名の評価、実際のtyping trace、入力遅延・RSS、実機IME／他アプリ、署名付きXcode全体build、Linux、SwiftLintは未実行。辞書と表示規則の追加で有限の例は改善したが、実用精度や閾値の最適性は主張しない。日本語を優先する分、ローマ字としても成立する未知の英単語を日本語表示にする場合がある。Escapeで原文を取り戻せる。
 
 適用先は独立した試用アプリで、通常IMEは未接続のため機能OFF、manual／XPC／IMKは未変更。IMEのインストール・削除・登録変更、LaunchAgent・ユーザー設定変更は行っていない。次はT5接続を進められる状態だが、T3品質gate・T6全体の編集安定化・T7評価は未完了のまま。今回の英語維持条件をT6全体の完了とは扱わない。
+
+## 空白なしの日本語間でmeetingを保持する修正（2026-09-24）
+
+利用者の `asitahameetinggaarimasu` からmeetingを抽出したいという依頼に対応した。開始HEADは `9eb99f1c9e051ab4268bc2a331392b038898a4c8`、git statusはclean。前節までがコミット済みであることと、リポジトリ内にAGENTS.mdがないことを確認した。会話の指示を適用し、通常IMEやユーザー設定は変更していない。
+
+### 原因・仕様差分・影響
+
+現在のモデルはUnicode scalar範囲 `[7,14)` のmeetingをすべてRAW寄り（pJA<0.5、平均約0.21）と判定していた。一方、`meeting + ga` の文字列が標準入力表でかなとして成立するため、日本語優先の全体表示がその英語判定を上書きしていた。旧試用画面で `明日はメエチンッがあります` となることも確認した。
+
+`JapanesePreferredSegmenter` に、全体を日本語表示へ進める前の英語区間保持を追加した。候補は**モデルのRAW run開始・終了境界だけ**で作り、辞書完全一致、既存の英語スコア条件、最小3文字・最大32文字を要求する。単語内の弱い日本語判定をまたいで複数runをまとめることは認める。これにより `asitahameeting` のeだけが日本語寄りになる場合もmeeting全体で判断できる。左右の日本語は独立に標準ローマ字として成立し、それぞれの平均pJAが既存hold値以上であることを要求する。適格候補の最長1語を保護後の連続区間ごとに採用する。
+
+末尾が `meetingg` のように未完子音だけなら、その子音は原文のまま表示する。この側は日本語への表示変更がないためhold条件を要求しない。日本語の読みを含む側のhold条件と内部の未完子音拒否は維持する。meeting固有の文字列分岐、任意の文字位置での全substring探索、Zenzaiのsubstring探索は追加していない。`asitanote` 等の従来の日本語表示は回帰試験で維持した。仕様04章§3.3と試用手順にも理由と適用条件を追記した。
+
+変更は試用adapterとそのテスト・文書だけ。T2/T3判定器、原文バッファ、Unicode範囲定義、辞書データ、モデルschema・v1/v2特徴量・係数・閾値値・LR・Viterbi・goldenは不変。モデルSHA-256は引き続き `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581`。追加データ取得・学習・test splitでの閾値調整は行っていない。
+
+### 検証結果と途中の失敗
+
+| 検証 | 結果 |
+|---|---|
+| 修正前の再現 | 新規回帰1件で3 assertion失敗（区間範囲・種別・表示）、0.525秒。`build/auto-mixed/embedded-english-before.log` |
+| 最初の修正後 | 日本語優先9件中8件成功、実Zenzaiの1件skip、2.392秒。提示例が `明日はmeetingがあります` となることを確認。`build/auto-mixed/embedded-english-first.log` |
+| 拡張した編集・保護試験 | 22件中5 assertion失敗。4件は追加入力／削除の `asitahameetingg` で右のgのpJA約0.5486がhold条件を満たさず、meetingまで日本語へ戻る実装不備。未完子音だけは原文保持するよう修正した。残る1件は新規テストがURL保護をrawと仮定していた誤りで、既存 `ProtectedSpanDetector` の定義どおりliteralの正確な期待値へ修正。`build/auto-mixed/embedded-english-targeted.log` |
+| 上記修正中のコンパイル | throwing式を短絡演算子の右側へ置いた際のtry不足1件。slice取得を分離して修正。`build/auto-mixed/embedded-english-targeted-fixed.log` |
+| 最終の対象試験 | **22件中19件成功、3件skip、3 suite、5.037秒**。元の期待値と未完gの保持条件を維持して再実行。`build/auto-mixed/embedded-english-targeted-final.log` |
+| Core全体、native方式 | **147件中142件成功、5件skip、16 suite、9.529秒**。既存manual、固定v1/v2 golden、新しく生成したPython数値parity、v1/v2のfixture exportと承認済みモデルexport parityを含む。`build/auto-mixed/embedded-english-core.log` |
+| 実Zenzai、ホストGPU | **3件成功、skipなし、2.276秒**。日本語優先の実GGUF再生へ提示例の完全一致を追加し、旧かな末尾・旧未完末尾も再実行。backend=zenzaiReady、専用プロセスのモデル読込1回。`build/auto-mixed/embedded-english-zenzai.log` |
+| Release試用アプリ | build成功 **14.45秒**、.appを更新して直接起動。実画面で `明日はmeeting → 明日はmeetingg → 明日はmeetingがあります` を確認。原文は提示例へ戻し、左文脈OFF。`build/auto-mixed/embedded-english-playground.log` |
+| 静的検査 | `git diff --check` 成功、モデルchecksum不変 |
+
+新規試験は `[0,7)` 日本語・`[7,14)` 英字・`[14,23)` 日本語の厳密な範囲・種別、`明日はmeetingがあります` の完全一致、meeting完成後の全prefixでの追加入力と逆順の削除、貼り付け、先頭の `meetinggaarimasu → meetingがあります`、Escape原文化・原文確定・child解放を確認した。人工スコアでは短語・辞書prefix・弱い日本語側の拒否、内部の未完ローマ字、Unicode前方のscalar範囲、URL保護を確認した。人工例は精度の根拠にしない。既存テストの期待値やモデルの閾値を弱めていない。
+
+全体試験のskipはoffline dataset bridgeと実Zenzai4件。そのうち3件だけ別途ホストGPUで成功し、既存の複数session共有GPU試験とoffline dataset bridgeは今回は未実行。設定を書き換える `testOptionPunctuationMappings` は従来どおり別途除外した。環境はmacOS 27.0 arm64／Swift 6.4／Xcode 27。native方式・user-level cache・macOS最低version差などの既存警告は残る。ホストGPU試験は一時領域・学習OFF。LaunchServicesの再検証はせず、既存の直接起動を継続した。
+
+今回の表示保持はモデルが示した境界と辞書の範囲に限る。複数の英単語を含む長い連結入力の一般的な分割、未知語・語形変化の網羅、meeting完成前のすべての打鍵遷移、広範な誤変換率・入力遅延・RSS、実機IME／他アプリ、Xcode全体build・Linux・SwiftLintは未実行。有限の例から一般的な抽出精度は主張しない。通常IMEは未接続で機能OFF、manual／XPC／IMK・インストール・削除・登録・LaunchAgent・ユーザー設定は未変更。ユーザー入力・文脈の記録を追加していない。T5へ進む前提を維持し、T3品質gate・T6全体・T7は未完了のまま。

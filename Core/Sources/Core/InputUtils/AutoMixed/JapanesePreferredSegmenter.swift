@@ -58,6 +58,12 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                              unchangedPrefixCount: unchangedPrefixCount) {
                     result.append(MixedSpan(sourceRange: range, kind: .raw))
                     nextEnglish.append(EnglishRegion(range: range, raw: word))
+                } else if let split = try embeddedEnglishSplit(inherited, in: range, source: source, scores: scores,
+                                                               unchangedPrefixCount: unchangedPrefixCount) {
+                    result += split
+                    for span in split where span.kind == .raw {
+                        nextEnglish.append(EnglishRegion(range: span.sourceRange, raw: try source.slice(span.sourceRange)))
+                    }
                 } else if let whole = japaneseSpan(range, source: source, scores: scores) {
                     // Preserve already accepted kanji/reading boundaries such as asitano + te.
                     // Never scan arbitrary substrings for dictionary matches inside a valid roman run.
@@ -106,6 +112,52 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         previousEnglish = nextEnglish
         previousRaw = raw.isEmpty ? nil : raw
         return result
+    }
+
+    /// Recover one complete English word using only model-proposed RAW boundaries.
+    /// A word may bridge several runs (a weak JA letter inside meeting), but its
+    /// Japanese flanks must independently parse and retain the model's hold evidence.
+    /// A pending-only buffer tail stays verbatim, so it needs no Japanese promotion.
+    private func embeddedEnglishSplit(_ inherited: [MixedSpan], in block: ScalarRange,
+                                      source: TextOffsetMap, scores: [Double],
+                                      unchangedPrefixCount: Int) throws -> [MixedSpan]? {
+        var best: [MixedSpan]?
+        var bestLength = 0
+        for (index, first) in inherited.enumerated() where first.kind == .raw {
+            for last in inherited[index...] {
+                let range = try ScalarRange(first.sourceRange.lowerBound, last.sourceRange.upperBound)
+                if range.count > 32 { break } // Same maximum word length as the lexicon.
+                guard last.kind == .raw, range != block,
+                      range.count >= policy.minimumPrefixLength, range.count > bestLength else { continue }
+                let word = try source.slice(range)
+                guard lexicon.exactLevel(word) != nil,
+                      isEnglish(word, range: range, scores: scores, atEnd: false,
+                                unchangedPrefixCount: unchangedPrefixCount) else { continue }
+                var pieces: [MixedSpan] = []
+                var independent = true
+                let flanks = [(block.lowerBound, range.lowerBound), (range.upperBound, block.upperBound)]
+                for (side, (lower, upper)) in flanks.enumerated() {
+                    if side == 1 { pieces.append(MixedSpan(sourceRange: range, kind: .raw)) }
+                    guard lower < upper else { continue }
+                    let flank = try ScalarRange(lower, upper)
+                    let ps = scores[lower..<upper]
+                    guard let japanese = japaneseSpan(flank, source: source, scores: scores) else {
+                        independent = false
+                        break
+                    }
+                    let flankRaw = try source.slice(flank)
+                    let pendingOnly = upper == source.scalarCount && japanese.kind == .japaneseKana
+                        && RomanSpanReading.parse(flankRaw)?.reading.isEmpty == true
+                    guard pendingOnly || ps.reduce(0, +) / Double(ps.count) >= model.holdJapaneseThreshold else {
+                        independent = false
+                        break
+                    }
+                    pieces.append(japanese)
+                }
+                if independent { best = pieces; bestLength = range.count }
+            }
+        }
+        return best
     }
 
     private func japaneseSpan(_ range: ScalarRange, source: TextOffsetMap, scores: [Double]) -> MixedSpan? {

@@ -142,6 +142,78 @@ import Testing
         #expect(bridge.activeChildCount == 0)
     }
 
+    @Test func embeddedEnglishRequiresCompleteWordsAndIndependentJapaneseFlanks() throws {
+        let chars = ["n": 0.1, "o": 0.1, "t": 0.1, "e": 0.1]
+        let preferred = try segmenter(fixture(0.99, characters: chars))
+        for (raw, expected) in [("kyanoteha", ["kya", "note", "ha"]),
+                                ("noteha", ["note", "ha"]), ("kyanote", ["kya", "note"])] {
+            preferred.reset()
+            let spans = try preferred.segment(raw)
+            #expect(try spans.map { try TextOffsetMap(raw).slice($0.sourceRange) } == expected)
+            #expect(try spans.filter { $0.kind == .raw }.map { try TextOffsetMap(raw).slice($0.sourceRange) } == ["note"])
+        }
+        // Complete words only, never a two-letter match or an embedded dictionary prefix.
+        for raw in ["kyatoha", "kyanotha"] {
+            preferred.reset()
+            #expect(try !preferred.segment(raw).contains { $0.kind == .raw })
+        }
+        let weakFlanks = try segmenter(fixture(0.6, characters: chars))
+        #expect(try !weakFlanks.segment("kyanoteha").contains { $0.kind == .raw })
+        let pending = try segmenter(fixture(0.99, characters: chars.merging(["g": 0.55]) { _, right in right }))
+        #expect(try pending.segment("kyanoteg").map(\.kind) == [.japaneseRoman, .raw, .japaneseKana])
+        // Deleting a flank vowel must not manufacture an internal incomplete Japanese run.
+        for raw in ["kynoteha", "kyanotexha"] {
+            let spans = try preferred.segment(raw)
+            for span in spans where span.kind == .japaneseRoman || span.kind == .japaneseKana {
+                let parsed = try #require(RomanSpanReading.parse(TextOffsetMap(raw).slice(span.sourceRange)))
+                #expect(parsed.suffix.isEmpty || span.sourceRange.upperBound == raw.unicodeScalars.count)
+            }
+        }
+        let unicode = "👩‍💻e\u{301} kyanoteha"
+        let spans = try preferred.segment(unicode)
+        #expect(spans.contains { $0.kind == .raw && $0.sourceRange == (try? ScalarRange(9, 13)) })
+        try MixedMarkedTextRenderer.validate(spans: spans, source: TextOffsetMap(unicode))
+        #expect(try MixedMarkedTextRenderer.render(raw: unicode, spans: spans, rawPreview: true).text == unicode)
+        let protectedRaw = "https://example.com/kyanoteha"
+        #expect(try preferred.segment(protectedRaw).map(\.kind) == [.literal])
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil))
+    func embeddedMeetingKeepsEnglishBetweenCompleteJapaneseRuns() throws {
+        let path = try #require(ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"])
+        let model = try LogisticLanguageModel(data: Data(contentsOf: URL(fileURLWithPath: path)))
+        let preferred = try JapanesePreferredSegmenter(model: model, lexicon: .bundled(), policy: .bundled(), focus: UUID())
+        let raw = "asitahameetinggaarimasu"
+        // The whole string happens to be valid roman input across meeting + ga.
+        #expect(RomanSpanReading.parse(raw)?.suffix == "")
+        let spans = try preferred.segment(raw)
+        #expect(spans.map(\.sourceRange) == [try ScalarRange(0, 7), try ScalarRange(7, 14), try ScalarRange(14, 23)])
+        #expect(spans.map(\.kind) == [.japaneseRoman, .raw, .japaneseRoman])
+        let bridge = try makeBridge()
+        defer { bridge.releaseAll() }
+        let engine = MixedCompositionEngine(segmenter: preferred, converter: MixedSessionConverter(
+            bridge: bridge, sessionID: UUID(), allowJapaneseReadingFallback: true))
+        try engine.replaceRaw(raw)
+        #expect(try engine.markedText().text == "明日はmeetingがあります")
+        #expect(!engine.usedRawFallback)
+        #expect(engine.buffer.text == raw)
+        // Paste, forward typing and backspace must agree once the full word exists.
+        for count in Array(14...raw.count) + Array((14...raw.count).reversed()) {
+            let partial = String(raw.prefix(count))
+            try engine.replaceRaw(partial)
+            #expect(try engine.markedText().text.contains("meeting"), "authored trace: \(partial)")
+            #expect(engine.spans.contains { $0.kind == .raw && $0.sourceRange == (try? ScalarRange(7, 14)) })
+            #expect(engine.buffer.text == partial)
+            #expect(!engine.usedRawFallback)
+        }
+        try engine.replaceRaw("meetinggaarimasu")
+        #expect(try engine.markedText().text == "meetingがあります")
+        try engine.replaceRaw(raw)
+        try engine.handle(.escape)
+        #expect(try engine.handle(.enter).commit?.text == raw)
+        #expect(bridge.activeChildCount == 0)
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil))
     func englishSentencesPreserveAmbiguousWordsUsingCurrentRawContext() throws {
         let path = try #require(ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"])
@@ -189,7 +261,8 @@ import Testing
         let engine = MixedCompositionEngine(segmenter: preferred, converter: converter)
         for (raw, expected) in [("asita", "明日"), ("asitan", "明日n"), ("asitano", "明日の"),
                                 ("asitanot", "明日のt"), ("asitanote", "明日のて"),
-                                ("sushi", "寿司"), ("made", "まで"), ("to", "と")] {
+                                ("sushi", "寿司"), ("made", "まで"), ("to", "と"),
+                                ("asitahameetinggaarimasu", "明日はmeetingがあります")] {
             preferred.reset()
             try engine.replaceRaw(raw)
             #expect(try engine.markedText().text == expected, "runtime fixture: \(raw)")
