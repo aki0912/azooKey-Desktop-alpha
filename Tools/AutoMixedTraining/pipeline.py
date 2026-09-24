@@ -92,6 +92,10 @@ def parser():
     evaluation.add_argument("--test", required=True, type=Path, help="same sealed dataset; only test partition is scored")
     evaluation.add_argument("--traces", action="store_true")
     evaluation.add_argument("--output", required=True, type=Path)
+    typing = commands.add_parser("evaluate-typing", help="replay dev originals through Swift on every grapheme prefix")
+    typing.add_argument("--model", required=True, type=Path, help="trained v2 runtime export, not a checkpoint")
+    typing.add_argument("--data", required=True, type=Path, help="sealed dataset; dev originals only")
+    typing.add_argument("--output", required=True, type=Path)
     return root
 
 
@@ -136,6 +140,11 @@ def main(argv=None):
         elif args.command == "export":
             export(load_checkpoint(args.model), args.output)
             print('{"status":"exported","release_ready":false}')
+        elif args.command == "evaluate-typing":
+            from typing_evaluation import evaluate_typing
+            require(not args.output.exists(), "typing evaluation output already exists")
+            write_new(args.output, evaluate_typing(load_dataset(args.data), args.model))
+            print('{"status":"typing_evaluated","partition":"dev","release_ready":false}')
         elif args.command == "evaluate":
             require(not args.output.exists(), "frozen evaluation output already exists")
             data = load_dataset(args.test)

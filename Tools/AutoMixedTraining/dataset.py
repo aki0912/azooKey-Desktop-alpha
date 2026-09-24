@@ -36,7 +36,10 @@ def load_sources(manifest_path):
     require(type(manifest["schema_version"]) is int and manifest["schema_version"] == 1
             and manifest["mode"] in ("fixture", "approved"), "unknown source manifest version/mode")
     integer(manifest["seed"], 0, 2**32 - 1)
-    fields(manifest["augmentation"], ("max_variants", "max_prefixes"))
+    fields(manifest["augmentation"], ("max_variants", "max_prefixes"), ("boundary_policy",))
+    if "boundary_policy" in manifest["augmentation"]:
+        from boundary_augmentation import POLICY
+        require(manifest["augmentation"]["boundary_policy"] == POLICY, "unknown boundary augmentation policy")
     integer(manifest["augmentation"]["max_variants"], 0, 8)
     integer(manifest["augmentation"]["max_prefixes"], 0, 8)
     require(isinstance(manifest["sources"], list) and manifest["sources"], "sources required")
@@ -271,6 +274,9 @@ def build_dataset(manifest_path, baseline_path=None):
         record["split"] = groups[record["group_id"]]["split"]
         full = [record] + variants(record, table, manifest["augmentation"]["max_variants"])
         additions = [(full[0], "original")] + [(r, "roman_variant") for r in full[1:]]
+        if manifest["augmentation"].get("boundary_policy"):
+            from boundary_augmentation import contrasts
+            additions += contrasts(record, full[1:])
         # At most eight prefixes per original, not eight per generated spelling.
         prefix_candidates = [(r, "prefix") for item in full for r in prefixes(item, manifest["seed"], 8)]
         prefix_candidates.sort(key=lambda pair: (len(pair[0]["raw"]) > 2, fingerprint(pair[0])))

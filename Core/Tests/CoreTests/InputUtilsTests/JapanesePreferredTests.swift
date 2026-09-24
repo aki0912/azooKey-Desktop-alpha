@@ -190,8 +190,56 @@ import Testing
         #expect(try preferred.segment(protectedRaw).map(\.kind) == [.literal])
     }
 
+    @Test func embeddedDictionaryWordDoesNotRequireViterbiEndpoints() throws {
+        // Authored scores isolate both missing endpoints; these are not accuracy samples.
+        for characters in [["n": 0.1, "o": 0.1, "t": 0.1, "e": 0.1, "g": 0.1],
+                           ["n": 0.51, "o": 0.1, "t": 0.1, "e": 0.1, "g": 0.1]] {
+            let model = try fixture(0.99, characters: characters)
+            let preferred = try segmenter(model)
+            for raw in ["kyanoteg", "kyanote", "kyanoteha", "kyanoteg"] {
+                let spans = try preferred.segment(raw)
+                #expect(spans.contains { $0.kind == .raw && $0.sourceRange == (try? ScalarRange(3, 7)) })
+                preferred.reset()
+                #expect(try preferred.segment(raw).map(\.sourceRange) == spans.map(\.sourceRange))
+                #expect(try preferred.segment(raw).map(\.kind) == spans.map(\.kind))
+            }
+            #expect(RomanSpanReading.parse("gqzha") == nil)
+            for raw in ["kynoteg", "kyanotegqzha", "kyanothg", "https://example.com/kyanoteg", "kyanoteg.txt"] {
+                preferred.reset()
+                let spans = try preferred.segment(raw)
+                let words = try spans.filter { $0.kind == .raw }.map { try TextOffsetMap(raw).slice($0.sourceRange) }
+                #expect(!words.contains("note"), "authored negative: \(raw)")
+            }
+            let raw = "👩‍💻e\u{301} kyanoteg"
+            let spans = try preferred.segment(raw)
+            #expect(spans.contains { $0.kind == .raw && $0.sourceRange == (try? ScalarRange(9, 13)) })
+            try MixedMarkedTextRenderer.validate(spans: spans, source: TextOffsetMap(raw))
+            #expect(try MixedMarkedTextRenderer.render(raw: raw, spans: spans, rawPreview: true).text == raw)
+        }
+        // Low-confidence Japanese flanks and high-confidence Japanese words still veto matches.
+        let weak = try segmenter(fixture(0.6, characters: ["n": 0.1, "o": 0.1, "t": 0.1, "e": 0.1, "g": 0.1]))
+        #expect(try !weak.segment("kyanoteg").contains { $0.kind == .raw })
+        #expect(try !segmenter(fixture(0.99)).segment("kyanoteg").contains { $0.kind == .raw })
+    }
+
+    @Test func wholeDictionaryWordDecisionPrecedesShorterEmbeddedWords() throws {
+        let model = try fixture(0.99, characters: ["m": 0.49, "a": 0.42, "d": 0.83, "e": 0.79])
+        let preferred = try segmenter(model, words: "mad\t10\nmade\t10\n")
+        #expect(try preferred.segment("made").map(\.kind) == [.japaneseKana])
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil))
     func embeddedMeetingKeepsEnglishBetweenCompleteJapaneseRuns() throws {
+        try replayEmbeddedMeeting(useZenzai: false)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil
+                  && ProcessInfo.processInfo.environment["AUTO_MIXED_ZENZAI_RESOURCES"] != nil))
+    func realZenzaiEmbeddedEnglishTypingRegression() throws {
+        try replayEmbeddedMeeting(useZenzai: true)
+    }
+
+    private func replayEmbeddedMeeting(useZenzai: Bool) throws {
         let path = try #require(ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"])
         let model = try LogisticLanguageModel(data: Data(contentsOf: URL(fileURLWithPath: path)))
         let preferred = try JapanesePreferredSegmenter(model: model, lexicon: .bundled(), policy: .bundled(), focus: UUID())
@@ -201,7 +249,7 @@ import Testing
         let spans = try preferred.segment(raw)
         #expect(spans.map(\.sourceRange) == [try ScalarRange(0, 7), try ScalarRange(7, 14), try ScalarRange(14, 23)])
         #expect(spans.map(\.kind) == [.japaneseRoman, .raw, .japaneseRoman])
-        let bridge = try makeBridge()
+        let bridge = try makeBridge(useZenzai: useZenzai)
         defer { bridge.releaseAll() }
         let engine = MixedCompositionEngine(segmenter: preferred, converter: MixedSessionConverter(
             bridge: bridge, sessionID: UUID(), allowJapaneseReadingFallback: true))
@@ -218,12 +266,25 @@ import Testing
             #expect(engine.buffer.text == partial)
             #expect(!engine.usedRawFallback)
         }
+        try engine.replaceRaw("")
+        for (index, character) in raw.enumerated() {
+            try engine.handle(.insert(String(character)))
+            if index >= 13 {
+                #expect(try engine.markedText().text.contains("meeting"))
+                #expect(engine.spans.contains { $0.kind == .raw && $0.sourceRange == (try? ScalarRange(7, 14)) })
+            }
+        }
+        for _ in 14..<raw.count {
+            try engine.handle(.backspace)
+            #expect(try engine.markedText().text.contains("meeting"))
+        }
         try engine.replaceRaw("meetinggaarimasu")
         #expect(try engine.markedText().text == "meetingがあります")
         try engine.replaceRaw(raw)
         try engine.handle(.escape)
         #expect(try engine.handle(.enter).commit?.text == raw)
         #expect(bridge.activeChildCount == 0)
+        if useZenzai { #expect(bridge.backend == .zenzaiReady) }
     }
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil))

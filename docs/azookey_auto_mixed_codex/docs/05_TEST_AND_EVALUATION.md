@@ -58,6 +58,14 @@
 
 T2後の比較にはv1 LR＋Viterbiと、同じ保護規則・分割で学習した確定済み左文脈付きv2 LR＋Viterbiを追加する。同一rawを `I ` と `明日` で入力する対照ペア、文脈取得不可、日本語文中の英語引用を別集計する。`fixtures/context_pairs.jsonl` は仕様上の期待意図であり、学習済みモデルの予測ではない。閾値と保留率のトレードオフを一緒に報告する。
 
+### 2026-09-25追補：開発データの実runtime入力途中評価
+
+`Tools/AutoMixedTraining/pipeline.py evaluate-typing --model <v2-export.json> --data <dataset.json> --output <new-report.json>` は、sealed datasetのdev原文だけを実Swiftの `JapanesePreferredSegmenter` へ渡す。元文groupと既存の分割は維持し、train／calibration／testや派生行を評価集合へ混ぜない。各原文をUnicode書記素単位で追加、末尾削除、各prefixの新規入力として再生する。毎回、現在のrawだけから特徴量・保護・ローマ字妥当性・辞書判定を計算する。
+
+出力は原文数、方向別のJA precision/recall、綴りが最後まで入力されたRAW正解spanの露出数と日本語化回数、既存位置のspan kind変化数、追加／削除／貼り付けのspan差、segment処理時間p50/p95。取得不可／空／非空文脈を分ける。読み表示と漢字変換は言語指標ではともにJAだが、span差の比較では区別する。短いprefixは元文の意図で採点しており、入力だけで意図が一意に決まるという評価ではない。露出数は同じ原文の相関した観測で、独立した正解例数ではない。英語の既存hysteresisによる差もあり、貼り付けとの差0を無条件の合格基準にはしない。
+
+これはモデル単体の完成文評価を補う候補比較資料で、閾値順位付けの目的関数や品質目標は変更しない。`train_punctuation.py` はexport後に同じdev評価を実行して `typing_dev.json` を残す。reportを確認せず合格モデルと扱わない。最終の漢字／かな表記は別の人工回帰試験と実Zenzaiで検証する。開発データの一般reportはZenzai、実IMK、独立testの評価ではない。本文・文脈をreportやログへ出さず、一時入力ファイルを終了時に削除する。
+
 ## 4. Zenzaiの評価
 
 判定器が渡した原文／読みspanが正しいか、候補生成が正しいか、選択UIが正しいかを分ける。

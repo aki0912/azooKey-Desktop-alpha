@@ -1,6 +1,6 @@
 # ローカル学習パイプラインの準備
 
-`pipeline.py` に7つのCLIを実装した。原本と権利確認資料を検証し、元文groupの分割を固定した後でローマ字variantとprefixを増やす。CPUでLRを学習し、別のcalibration区画でsigmoid校正を行い、Swift用JSONと検証用parityを書き出す。
+`pipeline.py` に8つのCLIを実装した。原本と権利確認資料を検証し、元文groupの分割を固定した後でローマ字variantとprefixを増やす。CPUでLRを学習し、別のcalibration区画でsigmoid校正を行い、Swift用JSONと検証用parityを書き出す。
 
 2026-09-24に旧50原文へCodex作成650件を追加し、計700原文でv1/v2のLR学習・校正・exportを完了した。品質基準は未達で、T3全体は未完了、自動モードはOFFのまま。追加650件の人手確認も未実施。必要なデータ量と確認箇所は [DATA_PLAN.md](synthetic_expansion/DATA_PLAN.md)、結果の見方は [ローカルUI](REVIEW_UI.md) を参照。fixtureは引き続き `kind=fixture` として隔離する。
 
@@ -15,7 +15,7 @@ PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
   --output build/auto-mixed/new-training-check
 ```
 
-出力先は未作成のディレクトリを指定する。既存の評価やモデルは上書きしない。smokeは全CLI、Pythonテスト、fitしたv1/v2 artifactのSwift parityを実行する。fixtureの原本とgoldenは書き換えない。個別CLIのPython実行環境も同じvenvを使う。
+出力先は未作成のディレクトリを指定する。既存の評価やモデルは上書きしない。smokeはfixture対応CLI、Pythonテスト、fitしたv1/v2 artifactのSwift parityを実行する。学習済みv2と承認済みdev原文を必要とする `evaluate-typing` は別途実行する。fixtureの原本とgoldenは書き換えない。個別CLIのPython実行環境も同じvenvを使う。
 
 `requirements.lock` は今回検証したPython 3.11環境の全実行依存をversion固定したもの。パッケージ配布物のhash付きlockではない。実行時はlockとの差異を検査し、Python版・依存版・lock SHA・実装SHAを学習manifestに残す。scikit-learn 1.9.1の公開 `coef_` / `intercept_` と `classes_ == [0,1]` を確認してexportする。疎なfloat64 CSR、LBFGS、L2、class_weightなし、1 threadを使用する。[LogisticRegression公式API](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html)
 
@@ -95,6 +95,7 @@ PYTHONDONTWRITEBYTECODE=1 build/auto-mixed/training-env/bin/python \
 | `tune-thresholds --model <calibrated.json> --data <dataset.json> --config <config.json> --output <retuned.json>` | 係数・校正値を固定してdevで採用閾値を再探索。test採点はしない |
 | `export --model <calibrated.json> --output <new-directory>` | model.json、manifest.json、固定自作例のparity.jsonを書き出す |
 | `evaluate --model <calibrated.json> --test <dataset.json> --traces --output <report.json>` | sealed datasetのtest原本だけを評価。追加の学習・閾値選択なし |
+| `evaluate-typing --model <export/model.json> --data <dataset.json> --output <report.json>` | dev原文の全書記素prefixで実Swiftの日本語優先処理を比較。追加／削除／各prefixの新規入力、完成した英語spanの保持、処理時間を集計 |
 
 全CLIは非ゼロ終了、既存出力の上書き拒否、入力検証を備える。ログには本文やcontextを出さず、件数・状態・内容を含まないエラーだけを出す。学習データの成果物には、明示的に渡された注釈済みraw/contextが含まれる。アプリの入力欄・ユーザー入力履歴から収集する機能はない。
 
@@ -107,6 +108,10 @@ devでは英語span破壊率0.5%以下の候補からJA recallを優先する。
 新しい学習設定version 2は文脈あり／なしの閾値を独立したグリッドで探索する。旧設定version 1の加算方式は再現用に保持。モデルschemaは不変で、語彙・係数・校正を固定した再探索も可能。全候補と目標未達を保存する。[探索条件・実測結果・再現手順](THRESHOLD_SEARCH.md) を参照。
 
 ## 評価と残る作業
+
+2026-09-25に `evaluate-typing` を追加した。モデル単体の完成文指標と異なり、実ローマ字判定・辞書・日本語優先・hysteresisを含む。本文・文脈をreportへ保存せず、一般データでは最終の漢字表記を採点しない。devだけを使い、testの再採点や閾値自動選択は行わない。`train_punctuation.py` はexport後に `typing_dev.json` の出力まで実行する。比較資料として確認し、既知の表示回帰試験と合わせて採用判断する。`release_ready=false` は維持する。既存の `evaluate --traces` のv1/v2数値回帰や学習重みは変更していない。[変更前後の比較と再実行手順](TYPING_EVALUATION.md) を参照。
+
+2026-09-24に、記号を考慮した230原文を追加し、930原文からv2を再学習した。今回の句点による表示崩れは実Zenzaiで解消したが、既存入力の回帰と保留増加があり未採用。[記号コーパス・時間・比較結果](punctuation_expansion/README.md) を参照。任意の `augmentation.boundary_policy` を指定した場合のみ、group分割後の句読点・括弧・空文脈対照を生成する。元文の重み、既存schema、fixture隔離、通常の未指定経路は維持する。
 
 評価JSONは英語span破壊率とWilson区間、JA precision/recall、境界F1、保留率、Brier、10bin reliabilityを出す。文脈の有無とcategory別も分け、分母0はnull。`--traces` はASCII原本の全prefixで特徴と実Swift保護maskを再計算し、既存位置の反転数を数える。Unicode原本は未replay件数を報告する。IMK打鍵試験やSwiftのレイテンシ測定ではない。
 

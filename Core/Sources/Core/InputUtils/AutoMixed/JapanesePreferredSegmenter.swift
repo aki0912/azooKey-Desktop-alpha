@@ -80,7 +80,7 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                 } else if let joined = try longVowelSpan(from: range, source: source, protected: protected) {
                     result.append(joined)
                     end = joined.sourceRange.upperBound
-                } else if let split = try embeddedEnglishSplit(inherited, in: range, source: source, scores: scores,
+                } else if let split = try embeddedEnglishSplit(in: range, source: source, scores: scores,
                                                                unchangedPrefixCount: unchangedPrefixCount) {
                     result += split
                     for span in split where span.kind == .raw {
@@ -88,7 +88,7 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                     }
                 } else if let whole = japaneseSpan(range, source: source, scores: scores) {
                     // Preserve already accepted kanji/reading boundaries such as asitano + te.
-                    // Never scan arbitrary substrings for dictionary matches inside a valid roman run.
+                    // Dictionary candidates above still require English evidence and valid flanks.
                     let anchors = inherited.filter { $0.kind == .japaneseRoman || $0.kind == .japaneseKana }
                     var pieces: [MixedSpan] = []
                     var cursor = start
@@ -161,21 +161,35 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         return MixedSpan(sourceRange: range, kind: .japaneseRoman)
     }
 
-    /// Recover one complete English word using only model-proposed RAW boundaries.
-    /// A word may bridge several runs (a weak JA letter inside meeting), but its
-    /// Japanese flanks must independently parse and retain the model's hold evidence.
-    /// A pending-only buffer tail stays verbatim, so it needs no Japanese promotion.
-    private func embeddedEnglishSplit(_ inherited: [MixedSpan], in block: ScalarRange,
+    /// Inspect complete dictionary words independently of the single Viterbi path.
+    /// Search is bounded by input length times the lexicon's maximum word length.
+    /// Current English evidence and independently valid Japanese flanks remain mandatory.
+    private func embeddedEnglishSplit(in block: ScalarRange,
                                       source: TextOffsetMap, scores: [Double],
                                       unchangedPrefixCount: Int) throws -> [MixedSpan]? {
-        var best: [MixedSpan]?
-        var bestLength = 0
-        for (index, first) in inherited.enumerated() where first.kind == .raw {
-            for last in inherited[index...] {
-                let range = try ScalarRange(first.sourceRange.lowerBound, last.sourceRange.upperBound)
-                if range.count > 32 { break } // Same maximum word length as the lexicon.
-                guard last.kind == .raw, range != block,
-                      range.count >= policy.minimumPrefixLength, range.count > bestLength else { continue }
+        let maximum = min(EnglishLexicon.maximumWordLength, block.count)
+        guard maximum >= policy.minimumPrefixLength else { return nil }
+        // The whole-word decision takes precedence over embedded shorter words.
+        // For example, rejecting made as English must not manufacture mad + e.
+        guard lexicon.exactLevel(try source.slice(block)) == nil else { return nil }
+        // Prefix sums reject unsupported candidates/flanks before invoking the roman parser.
+        var totals = [0.0], rawCounts = [0]
+        for p in scores[block.lowerBound..<block.upperBound] {
+            totals.append(totals.last! + p)
+            rawCounts.append(rawCounts.last! + (p < 0.5 ? 1 : 0))
+        }
+        func mean(_ lower: Int, _ upper: Int) -> Double {
+            (totals[upper - block.lowerBound] - totals[lower - block.lowerBound]) / Double(upper - lower)
+        }
+        // Longest match first, earliest start breaks ties; independent of typing history.
+        for length in stride(from: maximum, through: policy.minimumPrefixLength, by: -1) {
+            for lower in block.lowerBound...(block.upperBound - length) {
+                let upper = lower + length
+                let fraction = Double(rawCounts[upper - block.lowerBound] - rawCounts[lower - block.lowerBound]) / Double(length)
+                guard fraction >= policy.minimumRawFraction,
+                      source.isGraphemeBoundary(lower), source.isGraphemeBoundary(upper) else { continue }
+                let range = try ScalarRange(lower, upper)
+                guard range != block else { continue }
                 let word = try source.slice(range)
                 guard lexicon.exactLevel(word) != nil,
                       isEnglish(word, range: range, scores: scores, atEnd: false,
@@ -186,8 +200,13 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                 for (side, (lower, upper)) in flanks.enumerated() {
                     if side == 1 { pieces.append(MixedSpan(sourceRange: range, kind: .raw)) }
                     guard lower < upper else { continue }
+                    let hasJapaneseEvidence = mean(lower, upper) >= model.holdJapaneseThreshold
+                    // Only a terminal pending-only suffix can be retained without JA evidence.
+                    guard hasJapaneseEvidence || (side == 1 && upper == source.scalarCount) else {
+                        independent = false
+                        break
+                    }
                     let flank = try ScalarRange(lower, upper)
-                    let ps = scores[lower..<upper]
                     guard let japanese = japaneseSpan(flank, source: source, scores: scores) else {
                         independent = false
                         break
@@ -195,16 +214,16 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                     let flankRaw = try source.slice(flank)
                     let pendingOnly = upper == source.scalarCount && japanese.kind == .japaneseKana
                         && RomanSpanReading.parse(flankRaw)?.reading.isEmpty == true
-                    guard pendingOnly || ps.reduce(0, +) / Double(ps.count) >= model.holdJapaneseThreshold else {
+                    guard pendingOnly || hasJapaneseEvidence else {
                         independent = false
                         break
                     }
                     pieces.append(japanese)
                 }
-                if independent { best = pieces; bestLength = range.count }
+                if independent { return pieces }
             }
         }
-        return best
+        return nil
     }
 
     private func japaneseSpan(_ range: ScalarRange, source: TextOffsetMap, scores: [Double]) -> MixedSpan? {

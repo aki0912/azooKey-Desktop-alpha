@@ -4,6 +4,7 @@ public enum EnglishLexiconError: Error { case missingResource, invalidData, inva
 
 /// Immutable local lookup. No spelling service, user dictionary, network, or input logging.
 public struct EnglishLexicon: Sendable {
+    static let maximumWordLength = 32
     private let words: [String: Int]
     private let levels: [(Int, [String])]
     public var count: Int { words.count }
@@ -54,7 +55,7 @@ public struct EnglishLexicon: Sendable {
 
     private static func key(_ raw: String) -> String? {
         let bytes = Array(raw.utf8)
-        guard (1...32).contains(bytes.count), bytes.first != 39, bytes.last != 39,
+        guard (1...maximumWordLength).contains(bytes.count), bytes.first != 39, bytes.last != 39,
               bytes.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || $0 == 39 }),
               bytes.filter({ $0 == 39 }).count <= 1 else { return nil }
         return String(decoding: bytes.map { (65...90).contains($0) ? $0 + 32 : $0 }, as: UTF8.self)

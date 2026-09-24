@@ -1254,3 +1254,169 @@ macOS 27 arm64／Xcode 27／Swift 6.4。試験入力は人工例で、利用者�
 実Mach XPC試験4件成功、skipなし、2.770秒（`long-vowel-installed-tests.log`）。新試験でharike-n／harike-nn、ko-hi-、su-pa-、ra-menを一文字ずつ入力し、元のrawと範囲を保った一語span、ハリケーン／コーヒー／スーパー／ラーメンの候補選択・確定、Escapeの原文確定を確認した。既存の句読点・英語直後の記号・括弧・URL・数値・apple・meeting・二重確定防止の3試験も成功。実サーバーの人工入力試験であり、実IMKの物理打鍵確認とは区別する。
 
 作業途中、HEADが前回記号修正のcommit `d8cea7bb7c198cc969da605a3e67f84f872b6227` へ進んでいることを確認した。こちらからcommit操作は行わず、今回の長音修正差分と既存変更を保持した。最終 `git diff --check` 成功。今回の長音修正は未コミット。Mixed自動へ戻して通常利用で確認できる状態。物理打鍵・secure field・長時間利用は未確認。
+
+## 句点追加による「教えて」のひらがな化の原因調査（2026-09-24）
+
+利用者から `asitanotennkiwoosiete.` の句点入力で「教えて」が「おしえて」になる理由を質問された。開始HEADは `362fa25b9dc66f5df4e096ced74bffda1747d2db`、git statusはclean。前回の長音修正はこのHEADに含まれる。今回は原因調査であり、製品コード・モデル・設定・導入済みIMEは変更していない。旧資料パス `docs/auto-mixed/README.md` は存在しなかったため、配置済みの `docs/azookey_auto_mixed_codex/README.md` と追記案、実際のsegmenter／特徴量／converter／engineの定義を参照した。
+
+### 観測と原因
+
+導入済みMixed helperに独立したテストセッションから提示された固定例を一文字ずつ送り、確定左文脈が取得不可の条件で利用者報告と同じ変化を確認した。
+
+- 句点前：`明日の天気を教えて`。raw全体 `[0,21)` がjapaneseRoman。
+- 句点後：`明日の天気をおしえて。`。`[0,18)`（`asitanotennkiwoosi`）がjapaneseRoman、`[18,21)`（`ete`）がjapaneseKana、`[21,22)` がliteral。
+- Backspaceで句点を除くと、一つのjapaneseRomanへ戻り `明日の天気を教えて` になった。
+- 取得成功した空の左文脈を渡す対照では、句点後も `[0,21)` がjapaneseRomanで `明日の天気を教えて。` を維持した。利用者の実際の文脈取得状態は収集しておらず、上記は条件を制御した人工入力での比較。
+
+固定モデルを使うローカル調査でも同じ区間変化を確認。文字特徴は前後8文字とn-gram／EOSを参照するため、ASCII period追加で末尾の特徴が変わる。文脈取得不可では末尾eteの日本語スコア平均が句点後0.181となり、baselineがRAWへ分割する。JapanesePreferredSegmenterは前半の日本語区間を維持し、後半eteはhold閾値0.65未満のためjapaneseKanaにする。このスコアは校正済みの語の確率ではない。
+
+MixedSessionConverterはjapaneseKanaを読みだけで表示し、変換bridgeへ渡さない。調査harnessでもeteのbridge結果が存在しないことを確認。Zenzaiへ「おしえて」全体を渡した結果の候補変化ではなく、その手前で `osi` と `ete` に分断されたことが原因。句点表示policyはrawのperiodを「。」として表示するだけで、直接漢字をひらがなへ置換していない。通常辞書だけの対照は「押しえて。」となり、同じ分断でも前半の候補がZenzaiと異なる点を区別した。
+
+### 検証と未実施事項
+
+- macOS／Swift環境は前回と同じ。ローカルモデル・通常辞書の診断1件成功、5.551秒（`build/auto-mixed/period-diagnosis/local.log`）。文脈取得不可／空文脈取得成功、逐次入力／全体置換、句点削除を比較。入力保持・非fallbackを確認した診断の成功であり、症状が修正された意味ではない。
+- 実Mach XPCの導入済みhelper診断1件成功、skipなし、2.784秒（`build/auto-mixed/period-diagnosis/installed.log`）。独立セッションを終了し、ユーザーの入力セッション・入力ソース・登録には触れていない。調査用Swiftソースはbuild内に保存し、Coreテストへの一時リンクは削除した。
+- テスト／ビルド失敗なし。ユーザーcacheアクセス不可とnative build非推奨の既存警告あり。差分空白検査は成功。本文や文脈をアプリから取得する診断・常時ログは追加せず、記録は提示された固定テスト例のみ。
+
+修正・再学習・アプリbuild／更新・修正後の物理打鍵・全回帰は未実施。次に修正する場合は、句読点追加で日本語の語中に境界が生じる問題を対象にし、逐次入力だけの表示固定で隠さず、全体置換・削除・文脈可否・既存英語／保護tokenを対照にする。閾値の一律緩和や当該文字列の特例は今回追加していない。
+
+## 句点問題の根本原因と修正方針の調査（2026-09-24）
+
+利用者の「時々再現する根本原因と適切な修正方法を考える」依頼に対応。HEADは `362fa25b9dc66f5df4e096ced74bffda1747d2db` のまま、前回の本記録だけが未コミットで、その内容を保持した。実装・導入ではなく調査と設計を行い、[原因・対照実験・修正の責任範囲](docs/azookey_auto_mixed_codex/docs/10_PUNCTUATION_STABILITY_REVIEW.md) を追加した。
+
+実際のexport manifestを照合するとモデルの元datasetは `expanded-700-se-20260924` だった。初回は別のcanonical版を集計したが、SHA不一致に気づき、正しいdatasetで再集計してassertを追加。最終成果物は一致するdataset SHA `b5bd29bbf48da0b2f57f3152be2eb85bb8b2e7df1c501fd8248d5009754a707e` のtrainだけを対象とする。モデルSHAは従来どおり。凍結testの再採点・パラメータ選択はしていない。
+
+原因は三層。train原文481件でperiod直前8文字のASCII英字はRAW680位置／JA0位置で、日本語の句読点rawが欠けている。空文脈13原文には学習対象のRAW／JA英字位置がなく、v2の反復BOS特徴が空文脈を日本語側へ過大に加点する（取得不可との差は校正後logitで約+7.883）。さらに現モデルの切替ペナルティ0と、英語として採用しなかった部分をかなへ戻した後も古い区間境界を残す処理が、語全体のZenzai入力を阻害する。全体の平均スコアは既存hold値以上の約0.8705であり、単なる採用閾値の調整だけでは境界の問題を解消しない。
+
+実施した検証：
+
+- train集計・特徴量寄与・切替ペナルティの対照計算を `build/auto-mixed/period-root-cause/audit.py` で実施し、`audit.json` に保存。係数・特徴量・閾値は製品へ反映していない。
+- 現行segmenterの21入力×8終端×6文脈＝1,008条件で範囲検証と全体入力／逐次入力の最終spanを比較。差0件、診断1テスト成功・155.228秒（`matrix.log`）。これは予測が全件正解という意味ではない。追加対照で `osiete.` の全体かな化と `asitanote.` のnote英語化も確認し、単純な隣接span結合だけでは全症状を直せないことを記録した。
+- 導入済みhelperで、最初の文脈nil／空と後続文脈nil／空の4組を各3回再現。最初がnilなら3回とも「おしえて」、空なら3回とも「教えて」。途中の取得状態変更は影響せず、composition開始時に文脈を保持する実装と一致した。独立セッションを終了し、利用者の入力セッションは操作していない。
+- 実Zenzaiへ本文全体の読みを内部spanとして直接渡すと「明日の天気を教えて」を返した。上記実サーバー対照と合わせ2テスト成功・16.390秒、skipなし（`server-and-zenzai.log`）。モデルを強制変更した精度実験ではなく、変換呼出しの因果を確認する対照。
+
+一時テストソースはbuild内に保存し、Coreからのリンクを削除。SwiftPMの既存cache権限警告とnative build非推奨は残る。並行確認のためtest bundleの本体を直接起動しようとした試行はexec format errorで実行不可だったため、正式な `swift test` 経路で上記2テストを実行した。診断テストのassertion失敗はなし。差分空白検査成功。
+
+推奨は、現行回帰を保持して、判定後の日本語の変換単位と入力中かなpreviewを整理する差分と、実際の句読点raw・空文脈を含むデータ／モデル改善を分けて評価すること。モデル改善ではまず既存v2のデータ補完を比較し、文脈特徴を変更する場合は別versionにする。前表示の固定、nilを空へ置換、句点だけ推論前に差し替え、閾値の一律緩和は採らない。
+
+製品コード・学習モデル・IMEの更新は未実施。通常IMEのファイル・設定・登録は不変。利用者の実機で文脈の取得状態が実際に変動したかは未確認で、本文／文脈を取得・保存していない。新しい修正の実装・再学習・全回帰・物理打鍵・品質評価は次の作業として残る。
+
+## 記号コーパスの拡充と再学習・再現確認（2026-09-24）
+
+利用者の「記号類を考えてコーパスを増やし、再学習後に今回の問題を確認する」依頼に対応した。開始HEADは `362fa25b9dc66f5df4e096ced74bffda1747d2db`。前回からの本記録と調査メモを保持し、旧700原文・旧モデル・v1/v2 goldenを上書きしていない。会話AGENTS、既存の資料、権利記録、実際のデータ分割・学習・校正・export・Swift bridgeの定義を確認した。
+
+### データとパイプライン
+
+`Tools/AutoMixedTraining/punctuation_expansion/` に原文230件と権利記録、生成済みJSONL、確認表を追加。日本語75、混在45、英語60、URL・メール・path・数値等40、Unicode記号10件。本文はCodexの創作で、外部コーパスの取得やアプリ入力の収集はなし。利用者による今回の作成・学習指示を利用許可として記録し、注釈の全件人手確認は未実施と明記した。固定Converterで日本語の読み211か所を照合した。今回の再現文とshi版は学習原文に追加していない。
+
+source manifestに任意の `augmentation.boundary_policy` を追加し、指定時だけgroup分割後に句読点・括弧・空文脈対照を生成する。元文あたりの合計sample weight 1、prefix最大8、ローマ字variantの実Swift照合を保持。非空文脈で意図を与えた曖昧語を空文脈へ複製せず、AMBIGUOUSや構造保護tokenも自動増強から除外する。未指定の既存manifest経路、span/model schema、特徴量v1/v2、LR/ViterbiのSwift実装、manual、IMEの判定ロジックは変更しない。
+
+元のsealed dataset SHA `b5bd29bbf48da0b2f57f3152be2eb85bb8b2e7df1c501fd8248d5009754a707e` と原文・分割を照合して固定。新datasetは930原文、8,663行（原文930、ローマ字596、記号1,473、文脈1,876、prefix3,788）。別splitと衝突した派生行1,816件を除外し、元文を移さなかった。原文はtrain642／dev100／calibration102／test86。SHAは `ec912fd6d4731d141604f5b7012a0ccb5cd5cc8d58b32a40dd5f09fc2a80e2e3`。
+
+trainの派生行を含む集計では、periodの前8文字にJA_ROMAN9,587位置／RAW1,243位置、空文脈にJA36,449位置／RAW10,210位置がある。以前の欠落を埋めたことの確認であり、位置数を独立した原文数や学習重みと同一視しない。
+
+### 一括再学習の結果
+
+`build/auto-mixed/punctuation-930-20260924/` に独立したv2候補を学習・校正・exportした。基準モデルと同じ詳細グリッドを使い、語彙・係数はtrain、正則化と閾値はdev、sigmoidはcalibrationから選んだ。モデル形式・特徴量を変更せず、最低件数や品質目標を緩めていない。選択された閾値は文脈あり／なしとも0.99、hold0.65、切替ペナルティ0。
+
+データ構築とSwift検証9.378秒、LR学習とdev選択53.317秒、校正とdev閾値選択2.101秒、export0.804秒、全体65.603秒。時間は `perf_counter` の実測値を `timings.json` に保存。候補モデルSHA-256は `2cef9e0443d6ca5f54caf9c999959aa78d0ad7f8b030e0462a1749a091b1e02b`、`release_ready=false`。
+
+新規 `PunctuationModelRegressionTests` は、モデルを差し替えて同じ期待値を検証する。旧モデルでは1試験・8 assertion失敗・11.899秒（`build/auto-mixed/punctuation-model-before.log`）。再学習候補は通常辞書と実Zenzaiの両試験が成功、2件・skipなし・20.240秒（`punctuation-retrained-zenzai.log`）。文脈取得不可／取得成功空、si／shi、句点・読点の追加／削除／再入力、全体入力、確定、Escapeの原文回復を検証した。`asitanotennkiwoosiete.` → `明日の天気を教えて。` を、本文全体の日本語spanを維持した状態で確認した。実IMKの物理打鍵ではなく、同じCoreと実GGUFを使う隔離試験。
+
+ただし、関連Core回帰はrunner集計34件・5件skipで12 assertion失敗、29.231秒（`punctuation-model-after.log`）。失敗は `asitan`／`asitano` の判定とpending n表示、`asitanote` のかな末尾、孤立made、日本語対照のnote、`asitahameetingg` の入力途中の英語保持。apple確定後、長音、基本記号、Python／Swiftの新export parityは成功した。既存テストの期待値は変更していない。この候補で今回の症状は解消したが、既存動作の維持は未達なのでIMEへは反映しない。
+
+### 退行を避けるための比較実験
+
+記号を含むchar/ngramの係数のみを再学習する制約付きLRも別artifactで比較。非記号係数・文脈・基準校正・decoder・閾値を固定し、devでL2正則化、calibrationで残差倍率を選ぶ。独自optimizerの勾配は有限差分と照合した。特定語や今回の例の係数を手で指定する処理、実行時のモデル切替、語別workaroundは追加していない。
+
+- 既存の記号486特徴を使う `punctuation-symbol-refit-20260924` は24.544秒。既存入力の回帰は通るが、今回の句点試験8 assertion失敗（`punctuation-symbol-regression.log`、34件・5skip、28.527秒）。
+- 記号486枠をtrain由来の特徴へ置き換え、語彙数32,768と非記号の係数・キーを保持する `punctuation-symbol-refresh-20260924` は41.565秒。今回の句点試験4 assertion失敗（`punctuation-symbol-refresh-regression.log`、34件・5skip、28.107秒）。
+
+両方とも未採用で、制約付き学習が問題を解決したとは報告しない。これらの実験はv2特徴量定義やSwift scorerを変更しないが、一括再学習と学習可能なパラメータ範囲・校正方式が異なるため、記録と成果物を分離した。
+
+### 凍結後の評価・検証と未実施事項
+
+一括再学習候補を固定した後、test原文86件を一度評価し、同じ行で旧モデルと比較した（`evaluation.json` / `comparison.json`）。新規原文は23件で、旧testは以前に閲覧済み。全86件を未閲覧の独立testとはしない。testを見た後の追加学習・モデル選択はなし。
+
+旧→候補はJA precision99.20%→100%、JA recall74.25%→54.55%、英語破壊1/208→0/208、境界F1 0.700→0.627、保留率15.76%→26.60%。保留が増えており、全体精度向上や実用品質の達成は主張しない。これはLR＋Viterbi＋保留までの評価で、IME最終表示の精度とは異なる。prefix評価はASCII85原文・2,465遷移、既存位置のラベル変更2,095、Unicode1原文は未replay。各prefixで実Swift保護maskと特徴量を再計算し、実IMK打鍵とは区別した。
+
+Python最終試験は60件中46件実行成功・14skip、4.196秒（`punctuation-python-final.log`）。原文930／旧700の完全一致・旧group固定・派生行漏洩なし・periodと空文脈の両ラベル・権利／fixture隔離・数値勾配を含む。途中、新規unittestの属性名runが基底クラスのメソッドと衝突しTypeErrorになった。directoryへ修正し、同じ3検証を再実行して成功（`punctuation-dataset-tests.log`、1.961秒）。ログ中のpreview既存出力エラーは既存の拒否動作を検証する負例であり、学習失敗ではない。
+
+macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9と固定requirements.lockを使用。SwiftPM cache権限・native build非推奨など既存の警告は残る。`git diff --check` 成功。SwiftLintは未導入のため未実行。今回の既存IMEクライアント、通常manual、インストール・削除・登録・ユーザー設定への変更なし。新候補のアプリbuild／導入／実Mach XPC／物理打鍵／長時間運用は未実施。
+
+今回の依頼に対するデータ追加・再学習・特定症状の解消確認は完了した。新モデルの採用は既存回帰の失敗で見送った。[データ・学習方法・時間・失敗を含む結果](Tools/AutoMixedTraining/punctuation_expansion/README.md) を参照。次は、既存の入力途中の契約を保つ変換区間の設計と文脈特徴を見直し、今回のモデル改善と両立させる必要がある。通常IMEと導入済みMixedは従来のまま利用できる。
+
+## 再学習モデルの退行原因の調査（2026-09-24）
+
+利用者の「リグレッションの原因を調査して」に対応。HEADは `362fa25b9dc66f5df4e096ced74bffda1747d2db`。会話AGENTS・既存AGENTS・実装記録・仕様04/05章・前回の調査と学習成果物・実際の学習／Swift判定／表示処理を確認した。既存の未コミット差分は保持。今回は調査のみで、製品コード・採用閾値・既存テストの期待値・導入済みIMEは変更していない。
+
+詳細は [再学習後の退行調査](docs/azookey_auto_mixed_codex/docs/11_RETRAINING_REGRESSION_REVIEW.md)。診断ソースと生結果は `build/auto-mixed/regression-root-cause/` に保存した。利用者の本文・文脈は取得せず、既知の人工回帰例と権利確認済みtrain/devのみを分析した。
+
+### 確認できた原因
+
+- 記号・空文脈を含む完成文の増強は、原文ごとの総重み1を維持しても、入力途中の比率を維持しない。同じ既存train481原文でprefixの重み合計が241.0788→146.5375、約39.2%減少。元のprefix生成は記号／文脈variantに適用されない。新規原文と増強を別々にON/OFFする比較学習でも、句点改善と同時に未完n・te・英語後続gのスコアが変わることを確認した。
+- 閾値選定は完成したdev原文のLR＋Viterbi＋保留だけを評価し、実際の入力途中や日本語優先表示を評価しない。新dev155英語span中backupの1件が旧閾値で破壊され、1/155＝0.645%が0.5%制約を超えるため0.99／0.99へ厳しくなる。同じ新devでJA recallは旧閾値68.33%→新閾値52.25%。105候補中、全品質目標を満たすものは0だった。
+- `asitahameetingg` は末尾gのpJAが0.548635→0.273869となり、meetingとgが同じRAW runに入る。辞書照合がRAW runの端だけを候補にするため、meetingの末尾が失われ、既知の英単語を照合できなくなる。旧閾値／校正へ戻すだけでは解消しない。
+- `asitanote` は日本語の採用済み区間が失われると、後段の全体平均による日本語優先処理が全体を漢字変換する。旧係数のまま閾値だけ厳しくした対照でも通常辞書表示が「明日のて」→「明日の手」となる。低信頼化によって変換範囲が広がる逆転がある。madeも日英のスコアを漢字／かな表示へ流用するため通常辞書の表記が変わる。
+- 空文脈の日本語加点は校正後logitで+7.882789→+0.282207へ減り、空文脈noteが英語表示になった。「明日」「これは」の非空文脈は日本語を維持。これは旧空文脈の偏りへの依存を含む期待値であり、空文字だけで日本語意図を仮定してよいか仕様の整理が必要。テストを通すための過大加点の復元や語別例外は行わない。
+
+### 前回の失敗報告の精密化
+
+既存の12 assertion失敗は再現したが、すべてが自動モードの画面上の退行ではない。asitanは下位adapterの全位置0.65条件に届かず失敗する一方、日本語優先runtimeは「明日n」を保持する。asitanoは内部区間が変わるが表示は「明日の」のまま。
+
+さらに固定GGUFで実Zenzaiを比較すると、新旧ともasitanoteは「明日のて」、madeは「まで」を返した。通常辞書では表記が変わるが、実Zenzaiのこの人工例では変わらない。内部の変換範囲の退行は残るため、既存テスト失敗を無視してよいとはしない。
+
+実Zenzaiでも新規に表記が崩れたのは、文脈取得不可の `asitahameetingg`。「明日はmeetingg」→「あしたはめえちngg」を確認した。空文脈では現行モデルでもmeeting途中の英語保持ができていなかった。句点の報告例は今回も旧「明日の天気をおしえて。」→候補「明日の天気を教えて。」を確認した。実IMKの物理打鍵による確認ではない。
+
+### 実行した検証・失敗・制約
+
+- 既存6テストの再実行：旧モデル6件成功・4.787秒、新候補6件・12 assertion失敗・4.716秒。前回と同じ失敗で、期待値不変。ログは `regression-independent-thresholds-refined-20260924.log` と `regression-punctuation-930-20260924.log`。
+- 旧／新と閾値のみ／校正のみ交換の6条件×4人工文脈×14入力＝336条件。診断1テスト成功・81.791秒。Python／Swiftのlogitと確率3,816位置で最大絶対誤差0、保留後ラベルも336条件一致。全体入力／逐次入力の最終span差0。正解精度336件合格ではない。`swift-matrix.json` / `parity.json`。
+- trainだけを使う2×2の比較学習は34.996秒。新train語彙・C=10・optimizer・新校正値を固定し、新規原文と記号／文脈増強の寄与を分けた。両方ONは新モデルの全係数・切片を誤差0で再現。旧prefixの26行除外はすべての対照で維持し、校正し直していない診断実験である。新たな採用候補のexportやtestによるモデル選択はなし。`ablation.json`。
+- 実Zenzaiは旧／新×取得不可／空×7入力＝28条件。初回sandbox内ではMetalが0 MiBとされ、モデル読込が `error loading model: vector` で失敗。backend検証1 assertion失敗・2.097秒を `zenzai-matrix.log` / `zenzai-sandbox-failed.json` に保存し、成功結果に含めていない。ホスト側の隔離試験で同じテストを再実行し、実GGUF・backend ready・学習OFFで1件成功・1.872秒。`zenzai-host.log` / `zenzai-matrix.json`。
+
+macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。SwiftPM cache警告・native build非推奨等は残る。SwiftLintは未導入のため未実行。一時診断テストのCore内リンクは削除し、診断ソースはbuild内に保存した。新候補のアプリbuild・導入・実Mach XPC・実機打鍵・長時間利用は未実施。独立testの再採点は行っていない。
+
+次に進む際は、入力途中の表示評価と用途別の学習重みを選定へ含め、英単語候補の境界を単一Viterbi runから切り離す小さな差分を優先する。漢字／かな変換範囲の設計と空文脈の期待も別途整理する。今回それらの修正は未実装。通常IMEおよびMixedのインストール・削除・登録・利用者設定は不変。
+
+## 英単語候補の境界独立化と入力途中評価（2026-09-25）
+
+利用者の「英単語抽出をモデルの区切りだけに依存させない修正と、入力途中の評価追加」に対応。HEADは `362fa25b9dc66f5df4e096ced74bffda1747d2db`。既存AGENTS、本記録、仕様04/05章、前回の退行調査、実際の判定・学習・テスト定義を確認し、既存の未コミット変更を保持した。モデル再学習やIMEへの導入は今回の作業に含めていない。
+
+### 実装と仕様差分
+
+`JapanesePreferredSegmenter` の埋込み英単語候補を、Viterbiが提案したRAW runの端だけから作る方式から、保護後の区間内の辞書完全一致を調べる方式へ変更した。候補数は区間長×辞書の最大長32以内。最長の適格語を優先し、同長なら開始位置の早いものを採る。現在の英語スコア・RAW比率・辞書level・hysteresis、前後の独立したローマ字成立とhold条件は保持する。末尾の未完子音だけは従来どおりraw表示を許す。区間全体が辞書語ならその全体判定を優先し、短い別単語への切り分けを防ぐ。
+
+これにより、`asitahameetingg` のmeetingとgが一つのRAW runになってもmeetingを照合できる。候補増加による日本語中の誤抽出が影響として考えられるため、前後比較と負例を追加した。特定語の例外・閾値緩和・前表示の固定・探索中のZenzai呼出しは追加していない。モデル係数・特徴量v1/v2・LR/Viterbi・schema・golden・manual入力・辞書データは不変。仕様差分の理由と範囲は04章、評価方法は05章に追記した。
+
+`pipeline.py evaluate-typing` と専用Swiftテストを追加。approvedなsealed datasetのdev原文だけを、書記素単位の追加・末尾削除・各prefixの新規入力で再生する。実Swiftの特徴量、保護、ローマ字妥当性、辞書、日本語優先処理、hysteresisを毎回実行する。完成した英語正解spanの日本語化、JA precision/recall、既存位置のkind変更、追加と削除／貼り付けのspan差、segment時間を文脈取得不可／空／非空別に集計する。本文・文脈はreportやログへ出さず、一時要求・応答は終了時に削除する。依存ライブラリのDEBUG出力もcorpus処理中は抑制する。
+
+`train_punctuation.py` はexport後に同じdev評価と実測時間を保存するよう変更した。このhookを含む一括再学習は今回は未実行。同じ評価関数自体は下記4構成で実行済み。閾値の自動順位付けや学習重みは変更せず、候補レビュー資料として扱い、`release_ready=false` を維持する。
+
+### 変更前後の比較
+
+930原文datasetのdev100原文を固定し、HEADの旧segmenterと今回のsegmenterを同じSwift評価器で比較した。旧／新候補のモデルSHAはそれぞれ `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581`、`2cef9e0443d6ca5f54caf9c999959aa78d0ad7f8b030e0462a1749a091b1e02b` のまま。dataset SHAは `ec912fd6d4731d141604f5b7012a0ccb5cd5cc8d58b32a40dd5f09fc2a80e2e3`。
+
+- 現行モデル：追加時の完成した英語spanの日本語化が229/2,596（8.82%）から162/2,596（6.24%）へ減った。JA recall 95.71%→97.01%、precision 94.24%→94.96%。
+- 再学習候補：同193/2,596（7.43%）から139/2,596（5.35%）へ減った。JA recall 95.66%→96.36%、precision 94.67%→95.47%。
+- 削除時も現行216/2,441→154/2,441、候補183/2,441→132/2,441。追加／貼り付けのspan差は現行7件・候補3件、追加／削除は現行8件・候補6件で、修正前後で増えていない。
+- segment時間p95は現行36.946→37.073 ms、候補40.764→42.102 ms。このMacのDebugビルド各1回の値であり、IME全体の応答時間や性能目標への合格ではない。
+
+1構成8,024 snapshot、4構成合計32,096 snapshot。同じ100原文の相関した観測で、独立した32,096件の精度試験ではない。正解は完成文の意図ラベルなので、短い入力だけから意図を確定できるとも主張しない。一般corpusの最終漢字表記はこの評価の対象外。testの再採点やモデル選択は行っていない。[比較結果と実行手順](Tools/AutoMixedTraining/TYPING_EVALUATION.md) を参照。生reportと診断ソースは `build/auto-mixed/embedded-prefix-20260925/` に保存した。
+
+### 検証・途中の失敗
+
+以下のログ名は上記buildディレクトリからの相対名。
+
+- 新fixture試験は修正前に10 assertion失敗・0.218秒（`before.log`）。モデルが単語の両端を提案しない対照、Unicode範囲、保護token、弱い日本語根拠、不成立な前後区間を検証する。
+- 初回実装は関連runner集計25件で4 assertion失敗・15.199秒（`first-old.log`）。2件はmadeからmad＋eを誤抽出する新規退行で、全体の辞書語判定を優先する一般規則と回帰試験を追加して修正した。新規負例も見直した。`kyanotexha` は不成立なxhaの前に、変更前から存在するRAW境界を引き継ぐため、新しい候補探索だけの負例になっていなかった。`kyanotegqzha` へ変更し、gqzhaのparse不成立とnoteの非抽出を明示的に検証する。既存テストの期待値は変更していない。
+- この負例変更の追加監査では、xhaのparse不成立と、2種類の人工スコアで旧／新segmenterの範囲・kind一致を確認した（`invalid-flank-audit-final.log`、1件成功・0.045秒）。監査初回は両スコアともnoteの全範囲を持つという仮定で1 assertion失敗（`invalid-flank-audit.log`）。境界一致の確認は初回から成功し、全範囲を持つ条件を正しく限定して再実行した。製品コードへの追加変更はない。
+- 関連runner集計34件では、旧モデルの既知の句点問題8 assertionが残る（`second-independent-thresholds-refined-20260924.log`、26.275秒）。新候補も34件で8 assertion失敗（`second-punctuation-930-20260924.log`、26.757秒）。前回12件のうちmeetingの4件は解消し、残りは下位adapterのasitan／asitano、通常辞書のasitanote／made、空文脈noteの既知の退行。全回帰成功とは扱わない。
+- 旧モデルでの広いCore回帰はrunner集計186件・24 suite成功、23.346秒（`core-old-final.log`）。ユーザー設定を書き換える `testOptionPunctuationMappings` と、別途失敗を確認した旧モデルの `PunctuationModelRegressionTests` を明示的に除外。実Zenzai・導入済みhelper・環境変数を要するデータ／export parity等の条件skipが17件あり、186件すべてを実行済みとはしない。既存manualを含む通常の検証と、実際のinsert／backspaceを使うmeeting回帰を実行した。
+- Pythonは65件中51件成功・14skip、4.088秒（`python-all.log`）。追加5試験で、完成前の英語を完成語の破壊率へ数えないこと、方向間の差、Unicode scalar範囲、漢字／かなkindの区別、壊れたtraceの拒否、dev原文以外の除外を確認した。既存のpreview出力拒否エラー表示は負例の期待動作。
+- devの実Swift評価は変更前旧110.914秒／変更後旧111.296秒／変更前新115.297秒／変更後新120.649秒で各専用テスト成功。reportに個別ログ位置とfingerprintを記録した。
+- 実Zenzaiはホスト側の隔離テストで旧モデル1件成功・2.895秒（`zenzai-independent-thresholds-refined-20260924.log`）、新候補3件成功・11.862秒（`zenzai-punctuation-930-20260924.log`）、いずれもskipなし・backend ready・学習OFF。meetingの逐次追加／削除／全体入力・原文回復を両モデルで確認。新候補では既存の日本語表示回帰と `asitanotennkiwoosiete.` → `明日の天気を教えて。` も確認した。実IMKの物理打鍵とは区別する。
+
+macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。SwiftPM cache権限・native build非推奨等の既存警告あり。SwiftLintは未導入のため未実行。比較用のCore内一時リンクは削除し、ソースとログはbuild内に保存した。最終 `git diff --check` 成功、モデルSHA不変と資料の参照先を確認した。
+
+今回依頼された境界修正と入力途中評価は実装・検証済み。新候補は残る8 assertion失敗の整理が必要で、採用済みとはしない。用途別の学習重み、漢字／かな変換区間、空文脈の仕様、複数の埋込み英単語の同時探索は未変更。アプリbuild・IME反映・実Mach XPC・実機打鍵・長時間利用・独立test品質評価は未実施。通常IMEおよびMixedのインストール・削除・登録・利用者設定を変更せず、実際の入力本文／文脈も取得していない。
