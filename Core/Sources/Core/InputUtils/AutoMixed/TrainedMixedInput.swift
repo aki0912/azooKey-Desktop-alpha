@@ -17,9 +17,13 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     public func segment(_ raw: String) throws -> [MixedSpan] {
         let source = TextOffsetMap(raw)
         var proposed = try hypotheses(raw)
-        if let last = proposed.last, last.kind == .unresolved,
-           try admitsPendingTail(raw, source: source, span: last) {
-            proposed[proposed.count - 1] = MixedSpan(id: last.id, sourceRange: last.sourceRange, kind: .japaneseRoman)
+        if let last = proposed.last, last.kind == .unresolved {
+            if try admitsPendingTail(raw, source: source, span: last) {
+                proposed[proposed.count - 1] = MixedSpan(id: last.id, sourceRange: last.sourceRange, kind: .japaneseRoman)
+            } else if let split = try kanaTail(raw, source: source, span: last) {
+                proposed.removeLast()
+                proposed.append(contentsOf: split)
+            }
         }
         return try proposed.map { span in
             guard span.kind == .japaneseRoman else { return span }
@@ -34,6 +38,33 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     private func hypotheses(_ raw: String) throws -> [MixedSpan] {
         try judge.judge(LanguageJudgmentInput(raw: raw, leftCommittedContext: context,
                                               focusIdentity: focus, revision: 0)).hypotheses
+    }
+
+    /// Complete but less certain kana gets a reading-only tail, never a guessed kanji candidate.
+    private func kanaTail(_ raw: String, source: TextOffsetMap, span: MixedSpan) throws -> [MixedSpan]? {
+        guard let thresholds = model.contextualThresholds,
+              span.sourceRange.upperBound == source.scalarCount,
+              let split = RomanSpanReading.splitFinalKana(try source.slice(span.sourceRange)) else { return nil }
+        let end = span.sourceRange.lowerBound + split.prefix.unicodeScalars.count
+        let features = ContextualCharacterFeatures(raw, leftContext: context)
+        let scores = try (span.sourceRange.lowerBound..<span.sourceRange.upperBound).map {
+            try model.score(features, at: $0).japaneseProbability
+        }
+        guard scores.allSatisfy({ $0 >= thresholds.minimumJapanese }) else { return nil }
+        let prefixScores = scores.prefix(split.prefix.unicodeScalars.count)
+        let enter = context.isAvailable ? model.enterJapaneseThreshold : thresholds.enterWithoutContext
+        guard prefixScores.reduce(0, +) / Double(prefixScores.count) >= enter else { return nil }
+        // Local evidence for showing the tail as kana instead of RAW. This is not a
+        // calibrated word probability. Reuse the exported margin without lowering it.
+        let margin = scores.suffix(split.tail.unicodeScalars.count).reduce(0.0) { result, p in
+            let clipped = min(max(p, 1e-7), 1 - 1e-7)
+            return result + log(clipped) - log1p(-clipped)
+        }
+        guard margin >= thresholds.minimumPathMargin,
+              let complete = try hypotheses(source.slice(ScalarRange(0, end))).last,
+              complete.kind == .japaneseRoman,
+              complete.sourceRange == (try ScalarRange(span.sourceRange.lowerBound, end)) else { return nil }
+        return [complete, try MixedSpan(sourceRange: ScalarRange(end, source.scalarCount), kind: .japaneseKana)]
     }
 
     /// A single bounded prefix check, also valid for pasted raw. No previous display is trusted.
@@ -92,6 +123,14 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     }
 
     public func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate] {
+        if span.kind == .japaneseKana {
+            // Reading-only tails create no converter child or learnable Candidate token.
+            guard span.sourceRange.count == raw.unicodeScalars.count,
+                  span.sourceRange.upperBound == sourceScalarCount,
+                  let parsed = RomanSpanReading.parse(raw), parsed.suffix.isEmpty,
+                  !parsed.reading.isEmpty else { return [] }
+            return [MixedCandidate(token: UUID().uuidString, text: parsed.reading)]
+        }
         let left = leftDisplay.isEmpty ? leftContext : (leftContext ?? "") + leftDisplay
         let result = try bridge.candidates(for: JapaneseSpanRequest(
             identity: .init(sessionID: sessionID, compositionID: compositionID, spanID: span.id, revision: revision),

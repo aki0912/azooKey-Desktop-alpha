@@ -49,6 +49,8 @@ public struct UTF16Range: Codable, Sendable, Equatable {
 
 public enum SpanKind: String, Codable, Sendable {
     case japaneseRoman, raw, literal, gap, unresolved
+    /// Display-only reading of a complete roman tail. Never emitted by the LR/Viterbi model.
+    case japaneseKana
 }
 
 public struct MixedSpan: Sendable, Equatable {

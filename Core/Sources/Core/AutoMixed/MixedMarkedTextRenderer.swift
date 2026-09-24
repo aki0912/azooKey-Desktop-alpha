@@ -94,7 +94,8 @@ public enum MixedMarkedTextRenderer {
         for span in spans {
             let candidate = rawPreview ? nil : candidates[span.id]
             if let candidate {
-                guard span.kind == .japaneseRoman, !candidate.text.isEmpty, !candidate.token.isEmpty else {
+                guard span.kind == .japaneseRoman || span.kind == .japaneseKana,
+                      !candidate.text.isEmpty, !candidate.token.isEmpty else {
                     throw AutoMixedError.invalidCandidate
                 }
             }

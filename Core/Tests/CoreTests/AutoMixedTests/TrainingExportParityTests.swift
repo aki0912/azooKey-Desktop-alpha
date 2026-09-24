@@ -67,6 +67,9 @@ import Testing
                         case .gap: label = "GAP"
                         case .literal: label = "LITERAL"
                         case .unresolved: label = "UNRESOLVED"
+                        case .japaneseKana:
+                            Issue.record("The statistical judge must not emit a display-only kana span")
+                            label = "UNEXPECTED_KANA"
                         }
                         return Array(repeating: label, count: span.sourceRange.count)
                     }

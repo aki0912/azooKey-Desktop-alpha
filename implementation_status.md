@@ -765,3 +765,43 @@ T3の精度改善と独立test、T6の編集／表示安定化、T7の入力追�
 環境はmacOS 27.0 arm64／Swift 6.4／Xcode 27。ホストGPUの専用実行は一時領域・学習OFF。試用アプリは入力／文脈を記録せず、テストログの入力はタスクで明示した例と人工fixtureだけ。通常IMEの機能フラグOFF、manual経路・XPC／IMKは今回変更していない。IMEのインストール・削除・登録・ユーザー設定変更、追加学習、外部データ取得は行っていない。
 
 未実行は広範な英語誤変換率・typing trace・入力遅延・実機IME／他アプリ・署名付きXcode全体build・SwiftLint。追加した有限の回帰例から一般的な判別精度は主張しない。LaunchServices起動問題の再調査も未実行で、既存の直接起動を継続した。T5接続を進める前提は維持し、T6全体とT7の品質・性能評価は未完了のまま。
+
+## 完成した末尾をひらがなで表示する小差分（2026-09-24）
+
+依頼された `asitanote → 明日のて` を試用adapterに追加した。開始HEADは `616db3f6467d3cdf2e5a1a21208f5a244874e5b1`、git statusはclean。前節までの変更がコミット済みであることを確認した。今回の開始時にもリポジトリ内にAGENTS.mdはなく、会話で指定された指示を適用した。
+
+### 原因・変更・仕様差分
+
+現在の学習済みモデルは `asitanote` 全体をunresolvedとする。末尾teの文字位置pは約0.5881／0.7024で、強い日本語判定ではない。一方、現在のrawにおける前方 `asitano` の平均は約0.9833で、末尾を除いた `asitano` 自体も従来の採用基準を通る。このため、全体を漢字候補へ渡す以外に、末尾だけ読みを表示する段階を加えた。これらのpは単語や言語全体の正解確率ではない。
+
+- `RomanSpanReading.splitFinalKana` を新設。既存の `ComposingText.inputIndexToSurfaceIndexMap()` の定義を確認し、最後の独立入力単位でだけ分ける。両側が完全なかなになり、連結読みが元の読みと一致することを確認する。ASCII入力に限定してこのmapを使い、`kya/きゃ`、`tte/って`、`nki/んき` の内部で分断しない。
+- `TrainedMixedSegmenter` は末尾unresolvedの完全なローマ字runに限り、全位置がminimum_ja以上、前方prefixの平均が文脈別採用閾値以上、末尾単位のlog odds合計がminimum_path_margin以上という条件を要求する。さらに、末尾を除いたraw全体を同じ文脈で1回だけ再判定し、同じ前方範囲が従来の採用基準を通ることを確認する。RAW、URL等の保護範囲、内部区間は昇格させない。
+- 新設の表示専用span `japaneseKana` を追加し、エンジンとrendererが原文範囲を持つatomicな読み表示を扱う。前半は既存 `japaneseRoman`。候補操作は前半に作用し、かな末尾はそのまま残る。`MixedSessionConverter` はかな末尾を標準ローマ字表だけで描画し、Converter childや学習可能なCandidateを作らない。bridge本体は変更していない。
+- **採用規則の拡張**：前節の未完英字suffixに使うhold条件は維持した。今回は完成した末尾のかな表示専用に、既存minimum_ja=0.55と局所margin=1.2を使う。漢字採用の平均閾値（文脈あり0.90／なし0.98）を全体で下げる変更ではない。局所marginはViterbiの全path marginとは別の用途で、値の最適性は未検証。理由と影響を仕様04章§3.2に追記した。
+- モデルschema 2、特徴量v1/v2、係数・閾値値・LR・Viterbi・goldenは不変。学習ラベルやXPC wire型へjapaneseKanaを追加していない。export parityの網羅switchには、この表示専用値が判定器から出たら失敗するassertionを追加した。追加LR再判定は最大1回、分割候補は最後の1か所だけで、Zenzaiのsubstring探索は行わない。
+
+変更ファイルは `Core/Sources/Core/AutoMixed/{AutoMixedTypes,MixedCompositionEngine,MixedMarkedTextRenderer}.swift` と `Core/Sources/Core/InputUtils/AutoMixed/{RomanSpanReading,TrainedMixedInput}.swift`。テストは新規 `Core/Tests/CoreTests/InputUtilsTests/KanaTailTests.swift`、既存renderer／export parityテストへの追記。操作説明も `Tools/AUTO_MIXED_PLAYGROUND.md` に反映した。
+
+### 実行した検証
+
+| 検証 | 結果 |
+|---|---|
+| 初回の対象テスト | **11件中10件成功、実Zenzaiの1件skip、0.848秒**。コンパイル・assertion失敗なし。`build/auto-mixed/kana-tail-first.log` |
+| Core全体、native方式 | **137件中133件成功、4件skip、15 suite、6.035秒**。既存manual、v1/v2固定golden、Python parity、両版のfixture exportと学習済みexport一致を含む。`build/auto-mixed/kana-tail-core.log` |
+| 実Zenzai、ホストGPU | **2件成功、skipなし、1.047秒**。今回のかな末尾と前節の未完nの入力・編集・確定列を実GGUFで再検証。backendはzenzaiReady、当該専用プロセスのモデル読込は1回。`build/auto-mixed/kana-tail-zenzai.log` |
+| Release試用アプリ | build成功（14.38秒）、.app更新、直接起動成功。実画面でasitano入力後にt、eを1文字ずつ追加し、`明日の → 明日のt → 明日のて` を確認。原文欄はasitanote、左文脈OFF。`build/auto-mixed/kana-tail-playground.log` |
+| 静的・モデル不変確認 | `git diff --check` 成功。モデルSHA-256は `2c9ae52f24a1855a11ecc95d4e2ed80ff88fa5e79325a36102d247cfc0ad7581` のまま |
+
+追加テストは、独立ローマ字単位の実API、人工係数によるminimum・margin・前方採用閾値・文脈有無・切り詰め後の再判定の拒否条件、Unicode scalar／UTF-16境界と原文復元、RAW／URL／email／識別子／内部末尾、かな表示だけなら辞書要求・子session・学習可能tokenがないことを検証した。人工fixtureを判別精度の根拠にはしていない。
+
+現在の学習済みモデルでは `asitanote/ashitanote/asitanome` の前方漢字＋かな末尾を確認し、`note/notes/notebook/asianote` 等に今回のかな表示を適用しないことを確認した。辞書・Zenzaiの両方で、削除による `明日のt` への復帰、前半候補 `あしたの` の選択と `あしたのて` の確定、貼り付け、Escapeと原文確定、noteへの置換時の子session解放を確認した。既存テストの期待値は弱めていない。
+
+全体試験のskip 4件はoffline dataset bridgeと実Zenzai 3件。そのうち今回と前節のZenzai 2件だけ別途実行済みで、既存の複数session共有試験は今回は再実行していない。設定を書き換える `testOptionPunctuationMappings` は従来どおり別途除外した。今回の実行にコンパイル／assertion失敗はなく、既存のnative方式の非推奨警告・macOS最低version差等は残る。
+
+### 制約・次に進む前提
+
+適用は最後の独立入力単位に限る。たとえば現在のモデルでは `asitanoten` にRAW判定が混ざり、`asitanotenki` は切り詰めた前方自体が保留となるため、今回のかな末尾表示は適用しない。複数単位の弱い末尾を連続して維持する機能まで完成したとは扱わない。
+
+広範な英語誤変換率・typing trace・入力遅延・実機IME／他アプリ・Xcode全体build・SwiftLintは未実行。今回の有限例の通過から一般的な精度や速度を主張しない。環境は引き続きmacOS 27.0 arm64／Swift 6.4／Xcode 27。実Zenzaiテストは一時領域・学習OFF・ホストGPUで実行し、LaunchServices経路の再検証は行っていない。ユーザーの入力・文脈は永続化せず、ログ中の入力は明示した試験例と人工fixtureだけ。
+
+通常IMEの機能フラグはOFF、manual／XPC／IMKの入力経路は未変更。IMEのインストール・削除・登録・ユーザー設定変更、追加学習やデータ取得は行っていない。T5接続へ進む前提は維持し、T6全体・T7の品質評価は引き続き未完了。

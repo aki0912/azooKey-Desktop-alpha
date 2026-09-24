@@ -187,7 +187,7 @@ import Foundation
         var leftDisplay = ""
         for span in spans {
             let raw = try buffer.offsets.slice(span.sourceRange)
-            guard span.kind == .japaneseRoman else {
+            guard span.kind == .japaneseRoman || span.kind == .japaneseKana else {
                 leftDisplay += raw
                 continue
             }

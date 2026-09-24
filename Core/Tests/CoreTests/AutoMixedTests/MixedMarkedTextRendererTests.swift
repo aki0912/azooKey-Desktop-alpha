@@ -3,6 +3,25 @@ import Foundation
 import Testing
 
 @Suite struct MixedMarkedTextRendererTests {
+    @Test func kanaTailKeepsItsOwnAtomicRawRangeAndRestoresExactly() throws {
+        let raw = "👩‍💻e\u{301}asitanote"
+        let spans = try [MixedSpan(sourceRange: ScalarRange(0, 5), kind: .literal),
+                         MixedSpan(sourceRange: ScalarRange(5, 12), kind: .japaneseRoman),
+                         MixedSpan(sourceRange: ScalarRange(12, 14), kind: .japaneseKana)]
+        let candidates = [spans[1].id: MixedCandidate(token: "kanji", text: "明日の"),
+                          spans[2].id: MixedCandidate(token: "reading", text: "て")]
+        let output = try MixedMarkedTextRenderer.render(raw: raw, spans: spans, candidates: candidates)
+        #expect(output.text == "👩‍💻e\u{301}明日のて")
+        #expect(output.displayOffset(forRawScalar: 12) == 10)
+        #expect(output.displayOffset(forRawScalar: 13) == nil)
+        #expect(output.displayOffset(forRawScalar: 14) == 11)
+        #expect(output.rawScalarOffset(forDisplayUTF16: 10) == 12)
+        #expect(output.rawScalarOffset(forDisplayUTF16: 11) == 14)
+        let restored = try MixedMarkedTextRenderer.render(raw: raw, spans: spans, candidates: candidates, rawPreview: true)
+        #expect(restored.text.unicodeScalars.elementsEqual(raw.unicodeScalars))
+        #expect(restored.displayOffset(forRawScalar: 13) == 15)
+    }
+
     @Test func atomicConversionMapsOnlyEndpoints() throws {
         let raw = "👩‍💻ashita e\u{301}"
         let spans = try [
