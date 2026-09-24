@@ -127,7 +127,8 @@ def build(model, resources, diagnostics=False):
             "com.apple.inputmethod.Roman": "azooKey Mixed（英数）",
             BUNDLE_ID + ".Automatic": "azooKey Mixed（自動）",
         })
-    run("swift", "Tools/generate_mixed_ime_icon.swift", app / "Contents/Resources/auto.tiff", env=env)
+    # Approved outlined あA design, with 18px/36px representations at 18pt.
+    shutil.copyfile(ROOT / "Tools/Resources/mixed-auto.tiff", app / "Contents/Resources/auto.tiff")
     if diagnostics:
         (app / "Contents/Resources/auto-mixed-diagnostics.json").write_text(json.dumps({"enabled": True, "expiresAt": time.time() + 86400}))
     sign_app(app)

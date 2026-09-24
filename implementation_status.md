@@ -1529,3 +1529,29 @@ macOS 27 arm64／Xcode 27／Swift 6.4／Python 3.11.9。SwiftPM cache権限・na
 - 更新済みhelperの実Mach XPC試験4件成功、skipなし、3.594秒（`installed-tests.log`）。既存試験へ日本語・英語直後の `?`／`!`、`?!`、確定左文脈、URL内の記号を追加し、表示・ASCII原文・確定を確認。既存のapple、長音、混在文、commit重複除外も成功した。
 
 テスト・ビルド・更新の失敗なし。macOS 27 arm64／Xcode 27／Swift 6.4、既存の依存・SwiftPM native build・Xcode警告は残る。SwiftLintは未導入で未実行。最終 `git diff --check` 成功。再学習・新たな品質評価は行っておらず、`release_ready=false` は維持。実IMKの物理打鍵・secure field・長時間入力は今回未確認で、実サーバーの固定例試験とは区別する。通常版のファイル・設定・辞書・登録を変更せず、実際のアプリ本文・文脈を取得・記録していない。今回の差分は未コミット、Mixed版には反映済み。
+
+## 自動モードのA案「あA」アイコン（2026-09-25）
+
+利用者が選択したA案を実装。開始HEADは `e1c29e0`、ブランチは `codex/mixed-prefix-regressions`。開始時の未追跡 `design/` は前の提案素材として保持した。`design/mixed-menu-icons/a-bilingual.tiff` と同一の資源を `Tools/Resources/mixed-auto.tiff` に保存し、Mixed専用ビルドが `auto.tiff` へコピーする。旧「自」のSwift生成スクリプトは廃止した。フォント環境によるビルドごとの字形変化を避け、承認された形を固定する。自動モードの4つのアイコン参照と `TISIconIsTemplate=true` は維持。通常版・manualモード・変換処理・モデルは変更しない。
+
+### 検証
+
+ログと検証用スクリプトは `build/auto-mixed/icon-a-20260925/`。
+
+- 採用TIFFと提案Aのbyte一致を確認。ImageIO／AppKitで2表現（18px、36px）、両方18pt、黒単色・透過背景を確認（`icon-validation.log`）。比較画像も目視した。採用画像SHA-256は `8c81a8d693bf748febfe13f0e890536a56923611042a31116f1d538e80371dad`。
+- 現在のprefix重みモデルを明示してアプリ・helperをビルドし、資源receipt照合、ad-hoc署名とdeep strict検証成功（`build.log`）。モデルSHA `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22` とhelperのSHAは導入済み版と一致。診断ログOFF、通常日本語／英数のアイコン資源も不変（`hashes-before.json`）。品質未達の扱いは維持し、学習や精度評価は実行していない。
+- インストーラーの模擬OS試験13件成功、0.051秒（`installer-tests.log`）。実OSへの更新とは区別する。更新dry-runも成功（`update-dry-run.log`）。
+- 一時的なbundle検証スクリプトの初回だけ、runtime exportに存在しない `release_ready` を直接参照して `KeyError`。実際のexport定義を確認し、この誤った参照を削除した。製品コード・テスト期待値を変えず、同じモデルSHAと有効マーカーを確認して再実行成功（`bundle-validation-before.log`）。ビルド・既存試験の失敗はなし。
+
+macOS 27 arm64／Xcode 27／Swift 6.4。既存の依存・native build非推奨・署名前のバイナリ修正警告あり、最終署名検証は成功。SwiftLintは未導入で未実行。資源変更だけのため変換器の全回帰・再学習は未実行。OSが実際に表示するメニューバー、ライト／ダークの自動色反転、実IMK打鍵は未確認。
+
+### 反映状況
+
+最初のホスト照会でMixed（自動）が選択中だったため更新を待ち、利用者の切替報告後に `com.apple.keylayout.ABC` を確認した。利用者から今後の英数キーによる切替操作も許可されたが、今回はすでにABCだったためキー操作を行っていない。
+
+- 旧Mixedアプリを同ログディレクトリの `previous-azooKeyMixed.app` に保存後、Mixed専用 `update` で反映成功（`update.log`）。入力ソースの再登録・再有効化・選択操作は行っていない。更新前後ともABCで、Mixed全モードの有効状態・選択状態が一致（`current-pre-update.txt`／`current-after.txt`、`status-pre-update.json`／`status-after.json`）。
+- 導入先とビルドのapp／helper／モデル／アイコン／manual用2アイコンのSHAが一致（`hashes-after.json`）。appは `9bae39c6fa939f8bdb9e9c7675a5c7321d52cc40fbea51c1666efa260ae8e416`、自動アイコンは上記A案のSHA。導入先でも4つのアイコン参照・テンプレート指定・モデル有効マーカー・診断OFF・deep strict署名検証が成功。
+- 更新済みhelperへの実Mach XPC試験4件成功、skipなし、3.590秒（`installed-tests.log`）。appleの日本語確定後入力、長音、日英に接する記号（？／！を含む）、混在文とcommit重複除外を確認した。固定例を隔離セッションに送り、実際の利用者の本文・文脈は取得していない。
+- メニューバーの目視確認を試みたが、画面操作ツールの `TextInputMenuAgent` 取得が `timeoutReached`（-10005）で失敗した。画面状態は取得できず、実際の表示とライト／ダークの色反転は未確認。これをビルド・反映・XPC試験の成功とは区別する。
+
+Mixed版への反映は完了し、利用者が自動モードを選んで試用できる状態。通常版のファイル・設定・辞書・登録は変更していない。最終 `git diff --check` 成功。今回の差分は未コミット。

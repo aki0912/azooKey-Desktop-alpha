@@ -26,7 +26,7 @@ python3 Tools/install_mixed_ime.py update
 
 作業中の書類を保存して一度ログアウト・ログインし直し、システム設定 → キーボード → テキスト入力「編集」→「＋」で日本語の `azooKey Mixed` を追加する。その後、画面上部の入力メニューから `azooKey Mixed（自動）` を選ぶ。通常版はそのまま残す。再ログイン後も一覧に出ない場合の原因は未確認で、有効化できたとは扱わない。設定画面の手順は[Appleの入力ソース設定ガイド](https://support.apple.com/ja-jp/guide/mac-help/mchl84525d76/mac)を参照。
 
-- **自動**：日本語を優先し、モデルと英単語辞書の条件を満たす英語を保持する。例：`asitahameetinggaarimasu` → `明日はmeetingがあります`。
+- **自動（あA）**：日本語を優先し、モデルと英単語辞書の条件を満たす英語を保持する。例：`asitahameetinggaarimasu` → `明日はmeetingがあります`。入力メニューのアイコンは「あA」。18ptの単色テンプレート画像に18px／36pxの表現を含め、Retinaにも対応する。
 - **日本語**：既存の手動日本語入力。Spaceの候補操作などは従来の経路を使う。
 - **英数**：既存の英数入力。
 
