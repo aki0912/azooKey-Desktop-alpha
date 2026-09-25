@@ -33,6 +33,34 @@ import Testing
         }
     }
 
+    @Test func contextCannotInventEnglishBoundariesInsideRomanUnits() throws {
+        let model = try fixture(0.99)
+        let preferred = try JapanesePreferredSegmenter(model: model, lexicon: .bundled(), policy: .bundled(),
+                                                       context: .available("固定の文脈です。"), focus: UUID())
+        for raw in ["henn", "hennk", "hennkou", "hennkoutennga", "henkoutennga", "hennkoutenga", "henkoutenga"] {
+            preferred.reset()
+            let spans = try preferred.segment(raw)
+            #expect(spans.map(\.kind) == [.japaneseRoman], "roman units must stay intact: \(raw)")
+            #expect(spans.first?.sourceRange == (try ScalarRange(0, raw.count)))
+        }
+        // kitte is also an English dictionary prefix (kitten). Keep that existing
+        // kana-only policy, while preventing kit + te from bisecting the tte unit.
+        preferred.reset()
+        let geminate = try preferred.segment("kitte")
+        #expect(geminate.map(\.kind) == [.japaneseKana])
+        #expect(geminate.first?.sourceRange == (try ScalarRange(0, 5)))
+        // Whole English words retain the existing contextual decision.
+        for raw in ["hen", "kit", "ten", "meeting", "note"] {
+            preferred.reset()
+            #expect(try preferred.segment(raw).map(\.kind) == [.raw])
+        }
+        let raw = "👩‍💻 hennkoutennga"
+        let spans = try preferred.segment(raw)
+        #expect(spans.last?.kind == .japaneseRoman)
+        #expect(spans.last?.sourceRange == (try ScalarRange(4, 17)))
+        try MixedMarkedTextRenderer.validate(spans: spans, source: TextOffsetMap(raw))
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil))
     func dictionaryAfterCommit() throws { try replay(useZenzai: false) }
 

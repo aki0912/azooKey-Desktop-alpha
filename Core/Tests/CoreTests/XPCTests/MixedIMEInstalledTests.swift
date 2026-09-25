@@ -63,6 +63,55 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test func installedHelperKeepsHennkouReadingWholeAfterJapaneseContext() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-hennkou-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction, left: String?) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, context: .init(leftSideContext: left), action: action))))
+        }
+        func key(_ text: String, code: UInt16 = 0, left: String?) async throws -> ConverterServerResponse {
+            try await send(.key(.init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: code)), left: left)
+        }
+        func display(_ response: ConverterServerResponse) -> String { response.snapshot.markedText.elements.map(\.content).joined() }
+        for left in [nil, "", "日本語を入力して確定しました。", "今日はいい天気なので公園に出かけようと思います。"] as [String?] {
+            let raw = "hennkoutennga"
+            var response = opened
+            for character in raw { response = try await key(String(character), left: left) }
+            #expect(display(response) == "変更点が")
+            #expect(response.autoMixed?.raw == raw)
+            #expect(response.autoMixed?.status == .ready)
+            #expect(response.autoMixed?.spans.map(\.kind) == [.japaneseRoman])
+            #expect(response.autoMixed?.spans.first?.sourceRange == (try ScalarRange(0, raw.count)))
+            let list = try await key("\t", code: 48, left: left)
+            guard case .selecting(let candidates, _) = list.snapshot.candidateWindow else {
+                Issue.record("Expected whole hennkou reading candidates"); try await probe.close(session); return
+            }
+            #expect(candidates.first?.text == "変更点が")
+            let revision = try #require(list.autoMixed?.revision)
+            _ = try await send(.selectCandidate(index: 0, revision: revision, adopt: true), left: left)
+            #expect(display(try await key("\u{7f}", code: 51, left: left)) == "へんこうてん")
+            #expect(display(try await key("ga", left: left)) == "変更点が")
+            #expect(try await send(.selectCandidate(index: 0, revision: revision, adopt: true), left: left).autoMixed?.status == .staleRequest)
+            let committed = try #require(try await send(.commit, left: left).autoMixed?.commits.first)
+            #expect(committed.text == "変更点が")
+            #expect(try await send(.commitApplied(committed.commitID), left: left).autoMixed?.raw.isEmpty == true)
+            #expect(display(try await key(raw, left: left)) == "変更点が")
+            #expect(display(try await key("\u{1b}", code: 53, left: left)) == raw)
+            let original = try #require(try await send(.commit, left: left).autoMixed?.commits.first)
+            #expect(original.text == raw)
+            _ = try await send(.commitApplied(original.commitID), left: left)
+        }
+        _ = try await send(.deactivate, left: nil)
+        try await probe.close(session)
+    }
+
     @Test func installedHelperConvertsJapaneseAfterLongCommittedContext() async throws {
         let probe = MixedIMEProbe()
         let session = "installed-ja-after-commit-" + UUID().uuidString

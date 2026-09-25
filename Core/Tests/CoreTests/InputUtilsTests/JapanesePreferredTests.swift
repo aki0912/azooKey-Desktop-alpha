@@ -276,6 +276,20 @@ import Testing
         #expect(try preferred.segment("made").map(\.kind) == [.japaneseKana])
     }
 
+    @Test func independentEnglishEvidenceCanCrossRomanUnitsWithContext() throws {
+        let model = try fixture(0.99, characters: ["m": 0.1, "e": 0.1, "t": 0.1, "i": 0.1, "n": 0.1])
+        let preferred = try JapanesePreferredSegmenter(model: model,
+            lexicon: EnglishLexicon(data: Data("meeting\t10\n".utf8)), policy: .bundled(),
+            context: .available("固定の文脈です。"), focus: UUID())
+        let raw = "kyameetingga"
+        #expect(RomanSpanReading.parse(raw)?.suffix.isEmpty == true)
+        let boundaries = try #require(RomanSpanReading.independentInputBoundaries(raw))
+        #expect(!boundaries.contains(10))
+        let spans = try preferred.segment(raw)
+        #expect(try spans.map { try TextOffsetMap(raw).slice($0.sourceRange) } == ["kya", "meeting", "ga"])
+        #expect(spans.map(\.kind) == [.japaneseRoman, .raw, .japaneseRoman])
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"] != nil))
     func embeddedMeetingKeepsEnglishBetweenCompleteJapaneseRuns() throws {
         try replayEmbeddedMeeting(useZenzai: false)

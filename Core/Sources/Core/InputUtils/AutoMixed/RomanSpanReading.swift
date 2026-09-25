@@ -74,6 +74,17 @@ struct RomanSpanReading {
         return surface.allSatisfy({ !isKana($0) }) && piece == String(surface)
     }
 
+    /// Valid Japanese spelling may have a pending tail, but its completed input
+    /// units (nn, nko, tte, kya, etc.) must not be cut using character offsets alone.
+    static func independentInputBoundaries(_ raw: String) -> Set<Int>? {
+        guard let parsed = parse(raw), !parsed.reading.isEmpty else {
+            return nil
+        }
+        var full = ComposingText()
+        full.insertAtCursorPosition(conversionInput(raw), inputStyle: .roman2kana)
+        return Set(full.inputIndexToSurfaceIndexMap().keys)
+    }
+
     /// Last independent input-table segment, which can contain several kana (kya, tte, nki).
     /// Check both halves against the full reading; never split an input-table dependency.
     static func splitFinalKana(_ raw: String) -> (prefix: String, tail: String)? {
