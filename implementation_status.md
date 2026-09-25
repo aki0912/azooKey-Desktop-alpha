@@ -1807,3 +1807,39 @@ Mixed専用Releaseビルド、更新前検証、専用update、導入先のdeep 
 更新前後のMixedモード状態JSONは一致。選択ソースの観測値は開始時macOS標準日本語、終了時ABC。今回も入力ソース選択命令は実行していないが、切替原因は確認できていないため、選択ソースが同一だったとは記載しない。利用者の選択を強制的に戻す操作はしていない。
 
 macOS 27 arm64／Xcode 27／Swift 6.4で検証。既存のSwiftPM native非推奨・依存deployment target警告は残る。実アプリの物理打鍵、候補一覧表示の分布を用いた性能評価、SwiftLintは未実行。成功した実XPC試験とは区別する。コード・回帰試験・Mixed反映は完了。差分空白検査成功、未コミット。Mixed自動で13kaiを入力してTabで候補一覧を開き、2番目を選べる状態。
+
+
+## 英単語に続く日本語・長音の境界を保持する（2026-09-25）
+
+開始HEADは `aad42db`、working treeはclean。利用者の `samplenode-ta → sampleのデータ` と、認識済み英単語の境界が後続入力で崩れる問題へ対応した。モデル・辞書の追加学習ではなく、Mixed runtimeの候補区間の評価を修正。ログは `build/auto-mixed/english-suffix-20260925/`。
+
+### 修正方法と影響
+
+- 既存の英単語辞書・English gateを通った候補について、右側の日本語部分も長音を跨いで解析する。`sample + node-ta` を一つの日本語原文範囲として変換器へ渡す。
+- 全文内の日本語根拠が不足する場合、英単語候補が完成した日本語ローマ字ではなく、全体と後続が辞書登録語・prefixでないという条件付きで、後続を単独入力した場合の既存runtime判定を対照にする。確定文脈なしで全区間がjapaneseRomanになった場合だけ採用する。対照内の追加対照は禁止し、結果は同一判定内で共有。モデル・係数・閾値は変更していない。
+- 後続が読みとして妥当でも根拠が弱ければ、バッファ末尾に限ってunresolvedの原文で保留し、英単語へ後続文字を取り込まない。sample固有の単語例外や、過去の表示による境界固定ではなく、現在rawから判定する。逐次入力・貼付・削除・再入力を検証した。
+- `sample-data`／`sample-node` のような明示的ハイフン付き語は、左側が英語として採用済みで両側が辞書完全一致なら右側も英語で保持する。これは追加試験で見つかった従来の誤変換への対応。URL・パス・識別子・数式の保護、通常版/manual、XPC schema、原文のscalar範囲は維持する。
+- 単独の文字スコア平均だけで後続を判定する最初の方式では、長音語を読みとして扱う既存の単独入力ルールと一致せず、sampleの例が直らなかった。既存runtimeそのものを対照にする方式へ変更した。特徴量や閾値を弱めたわけではなく、文全体と同じ確率分布だと主張もしない。設計書§11.6に仕様差分・条件・影響を記載。
+
+### 途中の失敗と最終検証
+
+- 修正前は新規2試験118 assertion失敗、4.164秒（`before.log`）。最初の後続平均スコア方式は40件中、新規2件で98 assertion失敗、24.347秒（`after-first.log`）。後続runtime対照へ変更した段階では、主目的のsample/meeting/apple＋node-taは全条件で成功し、英語ハイフン語の8 assertionだけ失敗、4.858秒（`after-control.log`）。ハイフン語の完全一致保護で解消した。
+- 境界保持追加後の関連Core回帰 **46件・9 suite成功、skipなし、28.962秒**（`after-boundary.log`）。通常辞書・実Zenzai、文脈取得不可／空／固定日本語文脈の3条件でsample/meeting/apple＋node-ta、入力途中の英語範囲保持、貼付、削除・再入力、Tab、Escape、URL・英単語継続、句読点、長音、未完子音、不成立ローマ字、読み削除、13階詳細候補を確認。
+- 追加の一般化試験で、こちらが `kosu-to` を「コスト」と期待した誤りが判明。実際の読みは「こすーと」で、入力を正しい `ko-do`（こーど）へ変更した。また `sampleko-hi-` は区間が正しくても実Zenzaiが「samplecoffee」を先頭にする。これは区間処理ではなく同じ変換器の表記選択なので、追加例だけは同じ原文・左文脈を直接変換した先頭候補との一致と、区間・読みの完全一致を要求した。元の依頼の「sampleのデータ」の固定期待値は一切変更していない。
+- 追加例の最初の27件は9 assertion失敗、5.489秒（`core-final.log`）。診断メッセージ内のthrowing式がSwift Testingのnon-throwing autoclosureに入るコンパイルエラー（`extra-words.log`）も、値を先に計算して解消。実表示を記録した `extra-words-results.log` で上記の原因を確認した。
+- 修正後の追加・Core基礎回帰 **27件・7 suite成功、skipなし、5.370秒**（`core-final-verified.log`）。新規2試験、13階、engine状態遷移、session連続性、原文書記素、既定保護、Unicode表示範囲を含む。46件の実行とは重複があり、件数を足して独立試験数とは扱わない。
+
+固定の利用者提示例と自作fixtureだけを使用し、利用者のアプリ本文・確定文脈は取得・保存していない。通常辞書と実Zenzaiは別試験で、実Zenzai backend readyを要求し、学習OFFで実行。試験ログの一部は依存の標準出力と警告が交錯してUTF-8の不正バイトがあり、診断集計時はreplacement表示で読んだ。製品の本文ログ機能は追加していない。
+
+
+### Release反映と残事項
+
+凍結v1/v2 golden、既存Python参照データ、fixture v1/v2と承認済みexportの数値回帰は **22件・5 suite成功、skipなし、0.163秒**（`parity.log`）。特徴量activeIndices、LR logit/確率の誤差1e-12未満、Viterbi、v2区間例を維持。今回は既存参照データを使用し、再学習・Pythonデータの再生成はしていない。
+
+Mixed専用Releaseビルド・署名検証、専用updateのdry-runと更新が成功（`build.log`／`update-dry-run.log`／`update.log`）。更新済み実Mach XPCは **10件成功、skipなし、25.001秒**（`installed.log`）。新規試験5.543秒では、3つの固定文脈でsample/meeting/apple＋node-taを逐次入力し、各prefixの英語原文範囲、目的の表示、削除・再入力、確定・ackを検証。英単語継続・英語ハイフン語・URLも確認。既存の13階詳細候補、句読点後の入力、丸括弧、読み削除、長音、不成立ローマ字、apple、確定重複排除、1,000回入力・確定・ackも成功した。実アプリ本文は取得していない。
+
+ビルド先と導入先のapp/helper/モデル/3アイコンSHA一致、導入先のdeep strict署名検証成功。app SHAは `eeac9ff5c58a9b0c2e21935255bd9319ac58366df36464c44c3f8c86acb91507`、helper SHAは `08cc88326360d32f4c7987575f1ace7a82ecb5dc85debede933a4e8f14fe5d2c`。モデルSHAは `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22` のまま。モデル・アイコンは更新前と同一、IME/helperともRelease、診断OFF。更新前後のMixedモード状態JSONは一致し、選択中ソースはmacOS標準日本語のまま。旧Mixedを復旧用に保存し、通常版・入力ソース登録・有効状態は変更していない。
+
+macOS 27 arm64／Xcode 27／Swift 6.4。既存のSwiftPM native非推奨・依存deployment target警告は残る。実アプリでの物理打鍵、追加の対照判定による長文p95/p99への影響、SwiftLintは未実行。実XPCの成功や1,000回確定試験で、物理打鍵・性能目標達成を代用しない。未知語や曖昧語をすべて判別できるという主張もしない。
+
+実装・回帰・Mixed反映は完了。差分空白検査成功、差分は未コミット。Mixed自動へ切り替えて試用できる。次の確認項目は実アプリの物理打鍵と長文の追加判定コスト。

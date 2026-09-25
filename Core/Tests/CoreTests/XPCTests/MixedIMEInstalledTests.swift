@@ -64,6 +64,53 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test func installedHelperKeepsEnglishBoundaryBeforeJapaneseLongVowels() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-english-suffix-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction, left: String?) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, context: .init(leftSideContext: left), action: action))))
+        }
+        func key(_ text: String, code: UInt16 = 0, left: String?) async throws -> ConverterServerResponse {
+            try await send(.key(.init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: code)), left: left)
+        }
+        func display(_ response: ConverterServerResponse) -> String { response.snapshot.markedText.elements.map(\.content).joined() }
+        for left in [nil, "", "今日は晴れです。"] as [String?] {
+            for english in ["sample", "meeting", "apple"] {
+                let raw = english + "node-ta"
+                var response = opened
+                for (index, character) in raw.enumerated() {
+                    response = try await key(String(character), left: left)
+                    if index >= english.count {
+                        #expect(response.autoMixed?.spans.first?.sourceRange == (try ScalarRange(0, english.count)))
+                        #expect(response.autoMixed?.spans.first?.kind == .raw)
+                    }
+                }
+                #expect(display(response) == english + "のデータ")
+                #expect(response.autoMixed?.raw == raw)
+                #expect(response.autoMixed?.status == .ready)
+                #expect(display(try await key("\u{7f}", code: 51, left: left)) == english + "のでー")
+                #expect(display(try await key("ta", left: left)) == english + "のデータ")
+                let committed = try #require(try await send(.commit, left: left).autoMixed?.commits.first)
+                #expect(committed.text == english + "のデータ")
+                #expect(try await send(.commitApplied(committed.commitID), left: left).autoMixed?.raw.isEmpty == true)
+            }
+        }
+        for raw in ["sampler", "sampling", "sample-data", "sample-node", "https://example.com/samplenode-ta"] {
+            #expect(display(try await key(raw, left: "")) == raw)
+            let committed = try #require(try await send(.commit, left: "").autoMixed?.commits.first)
+            #expect(committed.text == raw)
+            _ = try await send(.commitApplied(committed.commitID), left: "")
+        }
+        try await probe.close(session)
+    }
+
     @Test func installedHelperEnumeratesFloorSecondWhenOpeningCandidates() async throws {
         let probe = MixedIMEProbe()
         let session = "installed-rich-candidates-" + UUID().uuidString

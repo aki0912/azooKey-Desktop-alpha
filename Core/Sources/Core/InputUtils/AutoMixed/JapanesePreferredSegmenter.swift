@@ -14,6 +14,7 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
     private let policy: EnglishDecisionPolicy
     private var previousEnglish: [EnglishRegion] = []
     private var previousRaw: String?
+    private var permitsSuffixHypothesis = true
     var retainedEnglishRegionCount: Int { previousEnglish.count }
 
     public init(model: LogisticLanguageModel, lexicon: EnglishLexicon, policy: EnglishDecisionPolicy,
@@ -59,6 +60,7 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         let unchangedPrefixCount = zip((previousRaw ?? "").unicodeScalars, raw.unicodeScalars).prefix { $0.0 == $0.1 }.count
         let scores = evidence.probabilities
         var scoresWithoutContext: [Double]?
+        var suffixEvidence: [String: Bool] = [:]
         var nextEnglish: [EnglishRegion] = []
         var result: [MixedSpan] = []
         var start = 0
@@ -97,6 +99,16 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                     english = isEnglish(word, range: range, scores: scoresWithoutContext!,
                                         atEnd: end == source.scalarCount, unchangedPrefixCount: unchangedPrefixCount)
                 }
+                // An explicit hyphen between complete dictionary words is an English
+                // compound, not a Japanese long vowel. The preceding word already
+                // passed the English gate; do not reinterpret data/node in isolation.
+                if !english, lexicon.exactLevel(word) != nil, result.count >= 2,
+                   result[result.count - 2].kind == .raw,
+                   lexicon.exactLevel(try source.slice(result[result.count - 2].sourceRange)) != nil,
+                   result.last?.kind == .literal,
+                   try source.slice(result.last!.sourceRange) == "-" {
+                    english = true
+                }
                 if english {
                     result.append(MixedSpan(sourceRange: range, kind: .raw))
                     nextEnglish.append(EnglishRegion(range: range, raw: word))
@@ -104,8 +116,10 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                     result.append(joined)
                     end = joined.sourceRange.upperBound
                 } else if let split = try embeddedEnglishSplit(in: range, source: source, scores: scores,
+                                                               protected: protected, suffixEvidence: &suffixEvidence,
                                                                unchangedPrefixCount: unchangedPrefixCount) {
                     result += split
+                    end = split.last!.sourceRange.upperBound
                     for span in split where span.kind == .raw {
                         nextEnglish.append(EnglishRegion(range: span.sourceRange, raw: try source.slice(span.sourceRange)))
                     }
@@ -216,12 +230,14 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
     /// Current English evidence and independently valid Japanese flanks remain mandatory.
     private func embeddedEnglishSplit(in block: ScalarRange,
                                       source: TextOffsetMap, scores: [Double],
+                                      protected: ProtectedText, suffixEvidence: inout [String: Bool],
                                       unchangedPrefixCount: Int) throws -> [MixedSpan]? {
         let maximum = min(EnglishLexicon.maximumWordLength, block.count)
         guard maximum >= policy.minimumPrefixLength else { return nil }
         // The whole-word decision takes precedence over embedded shorter words.
         // For example, rejecting made as English must not manufacture mad + e.
-        guard lexicon.exactLevel(try source.slice(block)) == nil else { return nil }
+        let blockRaw = try source.slice(block)
+        guard lexicon.exactLevel(blockRaw) == nil else { return nil }
         // Prefix sums reject unsupported candidates/flanks before invoking the roman parser.
         var totals = [0.0], rawCounts = [0]
         for p in scores[block.lowerBound..<block.upperBound] {
@@ -250,25 +266,59 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                 for (side, (lower, upper)) in flanks.enumerated() {
                     if side == 1 { pieces.append(MixedSpan(sourceRange: range, kind: .raw)) }
                     guard lower < upper else { continue }
-                    let hasJapaneseEvidence = mean(lower, upper) >= model.holdJapaneseThreshold
+                    let originalFlank = try ScalarRange(lower, upper)
+                    // Once the English boundary is proposed, validate the remaining
+                    // Japanese reading across long vowels, rather than converting de/ta apart.
+                    let joined = side == 1 ? try longVowelSpan(from: originalFlank, source: source, protected: protected) : nil
+                    let flank = joined?.sourceRange ?? originalFlank
+                    let flankRaw = try source.slice(flank)
+                    let localMean = joined == nil ? mean(lower, upper)
+                        : scores[flank.lowerBound..<flank.upperBound].reduce(0, +) / Double(flank.count)
+                    var hasJapaneseEvidence = localMean >= model.holdJapaneseThreshold
+                    // Evaluate the suffix using the existing standalone runtime policy,
+                    // including its long-vowel grammar. Disable this extra hypothesis in
+                    // the control so work cannot recursively branch. Cache only this edit.
+                    let anchoredSuffix = side == 1 && permitsSuffixHypothesis
+                        && lexicon.prefixLevel(blockRaw) == nil
+                        && RomanSpanReading.parse(word)?.suffix.isEmpty != true
+                    if !hasJapaneseEvidence, anchoredSuffix,
+                       lexicon.exactLevel(flankRaw) == nil, lexicon.prefixLevel(flankRaw) == nil,
+                       let parsed = RomanSpanReading.parse(flankRaw), !parsed.reading.isEmpty,
+                       parsed.suffix.isEmpty || flank.upperBound == source.scalarCount {
+                        if suffixEvidence[flankRaw] == nil {
+                            let control = try JapanesePreferredSegmenter(model: model, lexicon: lexicon,
+                                policy: policy, context: .unavailable, focus: UUID())
+                            control.permitsSuffixHypothesis = false
+                            let spans = try control.segment(flankRaw)
+                            suffixEvidence[flankRaw] = !spans.isEmpty && spans.allSatisfy { $0.kind == .japaneseRoman }
+                        }
+                        hasJapaneseEvidence = suffixEvidence[flankRaw] == true
+                    }
+                    // Keep the dictionary boundary while an otherwise readable tail
+                    // remains uncertain. Do not turn dictionary absence into JA evidence,
+                    // or leak tail letters into the English anchor (sample+n...).
+                    if !hasJapaneseEvidence, anchoredSuffix, flank.upperBound == source.scalarCount,
+                       RomanSpanReading.parse(flankRaw) != nil {
+                        pieces.append(MixedSpan(sourceRange: flank, kind: .unresolved))
+                        continue
+                    }
                     // Only a terminal pending-only suffix can be retained without JA evidence.
-                    guard hasJapaneseEvidence || (side == 1 && upper == source.scalarCount) else {
+                    guard hasJapaneseEvidence || (side == 1 && flank.upperBound == source.scalarCount) else {
                         independent = false
                         break
                     }
-                    let flank = try ScalarRange(lower, upper)
                     guard let japanese = japaneseSpan(flank, source: source, scores: scores) else {
                         independent = false
                         break
                     }
-                    let flankRaw = try source.slice(flank)
-                    let pendingOnly = upper == source.scalarCount && japanese.kind == .japaneseKana
+                    let pendingOnly = flank.upperBound == source.scalarCount && japanese.kind == .japaneseKana
                         && RomanSpanReading.parse(flankRaw)?.reading.isEmpty == true
                     guard pendingOnly || hasJapaneseEvidence else {
                         independent = false
                         break
                     }
-                    pieces.append(japanese)
+                    pieces.append(hasJapaneseEvidence && !pendingOnly
+                        ? MixedSpan(sourceRange: flank, kind: .japaneseRoman) : japanese)
                 }
                 if independent { return pieces }
             }
