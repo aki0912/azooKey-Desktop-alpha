@@ -214,5 +214,49 @@ private final class ProbeReply: @unchecked Sendable {
         #expect(ack.autoMixed?.commits.isEmpty == true)
         try await probe.close(session)
     }
+
+    @Test func installedHelperKeepsJapaneseAroundInvalidRoman() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-invalid-roman-probe-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, action: action))))
+        }
+        func key(_ text: String, code: UInt16 = 0) -> AutoMixedAction {
+            .key(.init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: code))
+        }
+        let raw = "zuttotukatteirutodanndannnyuuryokugaosokunarukigasurnndakedo"
+        var prefix = String(raw.prefix(51))
+        let before = try await send(key(prefix))
+        let japanese = before.snapshot.markedText.elements.map(\.content).joined()
+        #expect(!japanese.isEmpty && !japanese.contains(where: \.isASCII))
+        var display = ""
+        for character in raw.dropFirst(51) {
+            prefix.append(character)
+            let response = try await send(key(String(character)))
+            #expect(response.autoMixed?.status == .ready)
+            #expect(response.autoMixed?.raw == prefix)
+            display = response.snapshot.markedText.elements.map(\.content).joined()
+            #expect(display.hasPrefix(japanese + "r"))
+        }
+        #expect(display.hasSuffix("んだけど"))
+        #expect(display.filter(\.isASCII) == "r")
+        let commit = try #require(try await send(.commit).autoMixed?.commits.first)
+        #expect(commit.text == display)
+        _ = try await send(.commitApplied(commit.commitID))
+        let pasted = try await send(key(raw))
+        #expect(pasted.snapshot.markedText.elements.map(\.content).joined() == display)
+        _ = try await send(key("\u{1b}", code: 53))
+        let original = try #require(try await send(.commit).autoMixed?.commits.first)
+        #expect(original.text == raw)
+        _ = try await send(.commitApplied(original.commitID))
+        try await probe.close(session)
+    }
 }
 #endif

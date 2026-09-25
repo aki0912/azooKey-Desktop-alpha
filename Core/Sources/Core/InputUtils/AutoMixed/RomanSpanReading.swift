@@ -11,6 +11,54 @@ struct RomanSpanReading {
     var conversionInput: String { Self.conversionInput(prefix) }
     private static func conversionInput(_ raw: String) -> String { raw.replacingOccurrences(of: "-", with: "ー") }
 
+    struct IndependentRun {
+        let range: Range<Int>
+        let isJapanese: Bool
+    }
+
+    /// Split only at boundaries exposed by the real input table, never at guessed
+    /// roman syllables. The caller must independently require Japanese evidence.
+    static func independentRuns(_ raw: String, isAtBufferEnd: Bool) -> [IndependentRun]? {
+        guard !raw.isEmpty, raw.unicodeScalars.allSatisfy(isAdmitted) else { return nil }
+        var full = ComposingText()
+        full.insertAtCursorPosition(conversionInput(raw), inputStyle: .roman2kana)
+        let input = Array(raw), surface = Array(full.convertTarget)
+        let boundaries = full.inputIndexToSurfaceIndexMap().sorted { $0.key < $1.key }
+        guard boundaries.first?.key == 0, boundaries.first?.value == 0,
+              boundaries.last?.key == input.count, boundaries.last?.value == surface.count else { return nil }
+        var runs: [IndependentRun] = []
+        for (left, right) in zip(boundaries, boundaries.dropFirst()) {
+            guard left.value < right.value else { return nil }
+            let reading = surface[left.value..<right.value]
+            let japanese = reading.allSatisfy(isKana)
+            let piece = String(input[left.key..<right.key])
+            if japanese {
+                guard let parsed = parse(piece), parsed.suffix.isEmpty,
+                      parsed.reading == String(reading) else { return nil }
+            } else {
+                // A mixed independent segment cannot safely be divided further.
+                guard reading.allSatisfy({ !isKana($0) }), piece == String(reading) else { return nil }
+            }
+            if let previous = runs.last, previous.isJapanese == japanese {
+                runs[runs.count - 1] = IndependentRun(range: previous.range.lowerBound..<right.key, isJapanese: japanese)
+            } else {
+                runs.append(IndependentRun(range: left.key..<right.key, isJapanese: japanese))
+            }
+        }
+        // A terminal pending tail can stay attached to its preceding kana run, but
+        // an invalid tail such as rn remains exactly rn. No inserted/deleted keys.
+        if isAtBufferEnd, runs.count >= 2, let tail = runs.last, !tail.isJapanese {
+            let preceding = runs[runs.count - 2]
+            let range = preceding.range.lowerBound..<tail.range.upperBound
+            if let parsed = parse(String(input[range])), !parsed.reading.isEmpty {
+                runs.removeLast(2)
+                runs.append(IndependentRun(range: range, isJapanese: true))
+            }
+        }
+        guard runs.first?.isJapanese == true, runs.contains(where: { !$0.isJapanese }) else { return nil }
+        return runs
+    }
+
     /// Last independent input-table segment, which can contain several kana (kya, tte, nki).
     /// Check both halves against the full reading; never split an input-table dependency.
     static func splitFinalKana(_ raw: String) -> (prefix: String, tail: String)? {
@@ -30,9 +78,7 @@ struct RomanSpanReading {
     static func parse(_ raw: String) -> Self? {
         // The admitted characters are each one scalar/grapheme. Hyphen normalization
         // changes neither count; arbitrary Unicode input must not use this mapping.
-        guard !raw.isEmpty, raw.unicodeScalars.allSatisfy({
-            (97...122).contains($0.value) || $0.value == 39 || $0.value == 45 || $0.value == 0x30FC
-        }) else { return nil }
+        guard !raw.isEmpty, raw.unicodeScalars.allSatisfy(isAdmitted) else { return nil }
         var full = ComposingText()
         full.insertAtCursorPosition(conversionInput(raw), inputStyle: .roman2kana)
         // A Japanese long-vowel word can preview its terminal n as ん. Use the
@@ -75,5 +121,9 @@ struct RomanSpanReading {
 
     private static func isKana(_ character: Character) -> Bool {
         character.unicodeScalars.allSatisfy { (0x3041...0x3096).contains($0.value) || $0.value == 0x30FC }
+    }
+
+    private static func isAdmitted(_ scalar: Unicode.Scalar) -> Bool {
+        (97...122).contains(scalar.value) || scalar.value == 39 || scalar.value == 45 || scalar.value == 0x30FC
     }
 }

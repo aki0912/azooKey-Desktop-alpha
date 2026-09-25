@@ -122,6 +122,10 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                         } else if span.kind == .unresolved,
                                   let japanese = japaneseSpan(span.sourceRange, source: source, scores: scores) {
                             result.append(japanese)
+                        } else if span.kind == .unresolved,
+                                  lexicon.exactLevel(text) == nil,
+                                  let recovered = try recoverJapaneseRuns(span.sourceRange, source: source, scores: scores) {
+                            result += recovered
                         } else {
                             result.append(span)
                         }
@@ -133,6 +137,29 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         try MixedMarkedTextRenderer.validate(spans: result, source: source)
         previousEnglish = nextEnglish
         previousRaw = raw.isEmpty ? nil : raw
+        return result
+    }
+
+    /// A grammar error must not erase a Japanese-preferred region. Preserve only
+    /// independently readable runs; unknown letters keep their exact original range.
+    private func recoverJapaneseRuns(_ range: ScalarRange, source: TextOffsetMap,
+                                     scores: [Double]) throws -> [MixedSpan]? {
+        guard let runs = RomanSpanReading.independentRuns(try source.slice(range),
+            isAtBufferEnd: range.upperBound == source.scalarCount) else { return nil }
+        var result: [MixedSpan] = []
+        for run in runs {
+            let part = try ScalarRange(range.lowerBound + run.range.lowerBound, range.lowerBound + run.range.upperBound)
+            if run.isJapanese {
+                // Recovery is stricter than the ordinary low-confidence kana preview:
+                // every readable part must independently meet the exported JA hold gate.
+                let probabilities = scores[part.lowerBound..<part.upperBound]
+                guard probabilities.reduce(0, +) / Double(probabilities.count) >= model.holdJapaneseThreshold else { return nil }
+                guard let japanese = japaneseSpan(part, source: source, scores: scores) else { return nil }
+                result.append(japanese)
+            } else {
+                result.append(MixedSpan(sourceRange: part, kind: .raw))
+            }
+        }
         return result
     }
 

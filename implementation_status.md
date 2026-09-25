@@ -1555,3 +1555,36 @@ macOS 27 arm64／Xcode 27／Swift 6.4。既存の依存・native build非推奨�
 - メニューバーの目視確認を試みたが、画面操作ツールの `TextInputMenuAgent` 取得が `timeoutReached`（-10005）で失敗した。画面状態は取得できず、実際の表示とライト／ダークの色反転は未確認。これをビルド・反映・XPC試験の成功とは区別する。
 
 Mixed版への反映は完了し、利用者が自動モードを選んで試用できる状態。通常版のファイル・設定・辞書・登録は変更していない。最終 `git diff --check` 成功。今回の差分は未コミット。
+
+## 不成立ローマ字による全体英字化の修正（2026-09-25）
+
+開始HEADは `7049be7`、ブランチは `codex/mixed-prefix-regressions`、working treeはclean。利用者が提示した `zuttotukatteirutodanndannnyuuryokugaosokunarukigasurnndakedo`（60 scalar）を、導入中と同じモデルで一文字ずつ再現した。長さ上限ではなく、53文字目の `…sur → …surn` で読みが「…すrn」になり、`RomanSpanReading.parse` が不成立になることが発端だった。日本語優先表示の全体検証を通らず、全範囲がunresolvedとして原文表示された。英語辞書に採用された結果でも、converterの例外による全体fallbackでもない。
+
+この入力の平均日本語スコアは約0.9775で、現在のT3採用閾値0.99には届かない。通常の日本語優先表示は、読みが成立すれば別途かな漢字表示を認めるが、不正な文字を含む場合の独立部分の救済が欠けていた。ローマ字を `…surunn…` に直した対照は全体の読みが成立した。本文の自動補正を解決策にはしない。
+
+### 変更と仕様への影響
+
+- `RomanSpanReading.independentRuns` を新設。依存ライブラリで実際に定義されている `ComposingText.inputIndexToSurfaceIndexMap()` が返す独立境界を使い、かなに読める部分と原文のまま残った部分を分離する。各かな部分を同じ入力APIで読み直して一致を確認し、促音・拗音・nの依存を文字数で推測しない。かなと未変換文字が一つの不可分segmentに混在する場合は救済しない。独自のローマ字表、誤字補完、文字削除は追加していない。
+- `JapanesePreferredSegmenter` の保留時だけ、先頭が読める区間に限り部分変換を認める。日本語部分ごとに既存の `hold_ja`（現在0.65）以上の平均スコアを要求する。低信頼部分、英語判定済み範囲、辞書にある単語、URL等の保護は優先する。末尾のpending文字は既存parserで成立する場合だけ直前のかな部分へ付ける。今回の最終入力は `[0,51)` の日本語、`[51,52)` の原文 `r`、`[52,60)` の日本語になる。`rn` の入力途中でも先頭の日本語を保持する。
+- 製品変更は上記2ファイル。T0〜T2、`TrainedMixedSegmenter`、特徴量v1/v2、LR/Viterbi、学習済みモデル・閾値、golden、schema、manual、原文バッファは変更していない。01章と試用手順に部分変換の条件を追記した。
+- 既存の人工スコア試験にあった `abcai`／`asitaqz`／`sushibx` の「日本語区間を一つも含めない」は、今回修正する全体棄却を固定していたため訂正。読みが成立する正確な部分列（`a + b + cai`、`asita + qz`、`sushi + bx`）を要求し、変換対象には不正な文字が含まれないことを検証する。低信頼時に救済しない対照を追加。URL・メール・識別子、英語の負例、従来baselineの期待値は維持した。失敗数を減らすだけの任意出力許容にはしていない。
+
+### 検証と失敗履歴
+
+ログ・診断スクリプトは `build/auto-mixed/invalid-roman-20260925/`。入力は利用者提示の固定例と試験用に作成した文字列のみで、実際のアプリ本文・確定文脈・入力履歴を採取していない。変換試験は隔離セッション、学習OFF。
+
+- 修正前の逐次診断で52文字目までは日本語表示対象、53〜60文字目は全体unresolvedを確認（`probe-before.log`）。新規回帰試験は修正前に1件・3 assertion失敗、0.355秒（`regression-before.log`）。
+- 初回実装は「T3で日本語採用後に読みだけ棄却された場合」に限定し、元の3 assertionが失敗したままだった（`recovery-first.log`）。実スコアと採用閾値を確認して、この実装とbaselineへの一時変更を撤回。日本語優先表示の既存hold閾値で各部分を独立検証する最終形にした。次の実行は今回の例が成功し、上記の旧全体棄却試験3 assertionだけが失敗（`recovery-second.log`）。仕様理由を記して期待値を訂正した。
+- 拡張試験の初回は22件・4条件skip・1件失敗、31.521秒（`recovery-tests.log`）。新規テストが `kan'iqzdesu` を独立したかなに分けられると誤認していた。実際の固定依存は `n' → ん'` を不可分segmentとして保持する（`boundary-probe.log`）。製品コードで無理に分割せず、この例を救済不可の明示的な負例として残した。
+- 最終の関連Core回帰は43件・7 suite成功、skipなし、91.829秒（`core-final.log`）。通常辞書と実GGUF／Zenzai readyの両方で60文字の逐次入力、文脈取得不可／空、`rn` への遷移、削除・再入力、貼り付け、句点追加、表示確定、Escape原文確定、修正入力、Unicode範囲と表示offset、child解放を検証。既存のapple、meeting、曖昧語、pending nx、長音、記号と「教えて」の維持も成功した。
+- 実Zenzaiの最終表示は「ずっと使っていると段々入力が遅くなる気がすrんだけど」。通常辞書の先頭候補は「ずっと使っているとだんだん入力が遅くなる貴ガスrんだけど」で、表記順位の違いを全英字化の問題と混同しない。今回の契約は読みが成立する部分を変換し、`r` のみ原文で残すこと。人工スコア試験と実モデル試験は区別し、一般的な誤字判定精度の改善は主張しない。
+- 60文字の入力replay本体は通常辞書7.135／10.105秒、実Zenzai6.155／8.362秒（文脈取得不可／空）。起動・その他のassertionを含むsuite全体とは区別する。長時間利用で遅くなる現象の調査や性能合格を意味せず、その原因・長時間RSS・実IMKの打鍵遅延は未確認。
+
+### Mixed反映
+
+- 現在のモデルを明示してMixedアプリとhelperをビルドし、資源receipt照合・ad-hoc署名・deep strict検証成功（`build.log`）。インストーラーの模擬OS試験13件成功・0.047秒（`installer-tests.log`）。
+- ホスト側でABC選択中を確認し、旧Mixedを同ディレクトリの `previous-azooKeyMixed.app` へ保存。更新dry-run後、Mixed専用 `update` 成功（`update-dry-run.log`／`update.log`）。更新前後の選択中ソースは `com.apple.keylayout.ABC` で、Mixed全モードの有効状態も一致。切替操作・再登録・再有効化・通常版の変更はなし。
+- ビルドと導入先のapp／helper／モデル／自動・manualアイコンSHAが一致し、導入先の署名検証成功（`hashes-after.json`）。app SHAは `df03a5b549677eb2bb36250d010577d792978c7582166892a4eea0e5bcb7b3f7`、helperは `48740ee33ac968e39724d84ff0f3a0a6a9a6ecc6fb4df7fc286ed66dcdc9df85`。モデルは従来の `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22`、A「あA」アイコンも不変。診断ログOFF。
+- 更新済みhelperへの実Mach XPC試験5件成功、skipなし、4.982秒（`installed-tests.log`）。今回の例で変換済みprefixから1文字ずつ不成立部分を追加し、日本語保持、`r` だけの原文表示、貼り付けとの一致、表示／原文確定を確認。既存の4試験も成功した。
+
+macOS 27 arm64／Xcode 27／Swift 6.4。既存のSwiftPM・依存警告と依存Converterのデバッグ出力あり。SwiftLintは未導入で未実行。ビルド・更新・最終試験の失敗なし。実IMK物理打鍵・長時間利用・独立データでの品質評価・再学習は未実施で、モデルの品質未達という扱いは維持。診断用の一時テストリンクは削除済み。最終 `git diff --check` 成功。修正はMixedへ反映済み、差分は未コミット。

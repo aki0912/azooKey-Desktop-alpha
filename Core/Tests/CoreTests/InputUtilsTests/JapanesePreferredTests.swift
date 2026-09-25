@@ -65,7 +65,17 @@ import Testing
         // Dictionary matches remain conditional, including the ambiguous words.
         #expect(try weak.segment("made").map(\.kind) == [.raw])
         #expect(try preferred.segment("made").map(\.kind) == [.japaneseRoman])
-        for raw in ["abcai", "asitaqz", "sushibx", "https://example.com/asita", "name@example.com", "file_name"] {
+        // Invalid letters now keep only their own raw range. The old whole-token
+        // veto erased readable Japanese after a typo; never pass that typo to conversion.
+        for (raw, parts) in [("abcai", ["a", "b", "cai"]), ("asitaqz", ["asita", "qz"]), ("sushibx", ["sushi", "bx"])] {
+            let spans = try preferred.segment(raw)
+            #expect(try spans.map { try TextOffsetMap(raw).slice($0.sourceRange) } == parts)
+            for span in spans where span.kind == .japaneseRoman {
+                #expect(RomanSpanReading.parse(try TextOffsetMap(raw).slice(span.sourceRange))?.suffix.isEmpty == true)
+            }
+            #expect(try weak.segment(raw).allSatisfy { $0.kind != .japaneseRoman && $0.kind != .japaneseKana })
+        }
+        for raw in ["https://example.com/asita", "name@example.com", "file_name"] {
             #expect(try !preferred.segment(raw).contains { $0.kind == .japaneseRoman || $0.kind == .japaneseKana })
         }
     }
