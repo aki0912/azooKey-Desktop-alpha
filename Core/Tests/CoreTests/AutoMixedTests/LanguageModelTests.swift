@@ -43,8 +43,8 @@ func checkScore(_ vector: ScoreVector, model: LogisticLanguageModel) throws {
     #expect(try features.keys(at: vector.index) == vector.features)
     let score = try model.score(features, at: vector.index)
     #expect(score.activeIndices == vector.active_indices)
-    #expect(abs(score.logit - vector.logit) < 1e-12)
-    #expect(abs(score.japaneseProbability - vector.p_ja) < 1e-12)
+    #expect((score.logit - vector.logit).magnitude < 1e-12)
+    #expect((score.japaneseProbability - vector.p_ja).magnitude < 1e-12)
 }
 
 @Suite struct LanguageModelTests {
@@ -153,7 +153,7 @@ func checkScore(_ vector: ScoreVector, model: LogisticLanguageModel) throws {
         #expect(negative.activeIndices.isEmpty)
         #expect(positive.logit == 1)
         #expect(negative.logit == -1)
-        #expect(abs(positive.japaneseProbability - 1 / (1 + exp(-2.5))) < 1e-12)
+        #expect((positive.japaneseProbability - 1 / (1 + exp(-2.5))).magnitude < 1e-12)
         #expect(negative.japaneseProbability < 0.5)
         #expect(try LogisticLanguageModel.sigmoid(1000) == 1)
         #expect(try LogisticLanguageModel.sigmoid(-1000) == 0)

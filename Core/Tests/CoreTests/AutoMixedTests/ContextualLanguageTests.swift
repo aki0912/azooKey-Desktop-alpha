@@ -57,8 +57,8 @@ private func checkContextGolden(_ file: URL, count: Int? = nil) throws {
         #expect(try features.keys(at: vector.index) == vector.features)
         let actual = try model.score(features, at: vector.index)
         #expect(actual.activeIndices == vector.active_indices)
-        #expect(abs(actual.logit - vector.logit) < 1e-12)
-        #expect(abs(actual.japaneseProbability - vector.p_ja) < 1e-12)
+        #expect((actual.logit - vector.logit).magnitude < 1e-12)
+        #expect((actual.japaneseProbability - vector.p_ja).magnitude < 1e-12)
     }
 }
 

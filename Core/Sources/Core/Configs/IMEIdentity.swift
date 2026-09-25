@@ -31,7 +31,7 @@ public enum IMEIdentity: String, Sendable {
             if directory.lastPathComponent == "Contents" {
                 let url = directory.appendingPathComponent("Info.plist")
                 if let data = try? Data(contentsOf: url),
-                   let plist = try? PropertyListSerialization.propertyList(from: data, options: 0, format: nil) as? [String: Any],
+                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
                    plist["CFBundleIdentifier"] as? String == Self.mixed.bundleIdentifier {
                     return .mixed
                 }

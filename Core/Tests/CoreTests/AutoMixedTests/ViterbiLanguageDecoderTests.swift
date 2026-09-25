@@ -64,7 +64,7 @@ import Testing
                         let candidate: [BinaryLanguageLabel] = (0..<count).map { bits & (1 << $0) == 0 ? .raw : .japaneseRoman }
                         return pathCost(candidate, probabilities: probabilities, penalty: penalty, forced: forced)
                     }.min()!
-                    #expect(abs(pathCost(path, probabilities: probabilities, penalty: penalty, forced: forced) - best) < 1e-10)
+                    #expect((pathCost(path, probabilities: probabilities, penalty: penalty, forced: forced) - best).magnitude < 1e-10)
                 }
             }
         }

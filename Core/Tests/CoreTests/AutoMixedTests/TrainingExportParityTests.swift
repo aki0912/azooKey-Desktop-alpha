@@ -45,8 +45,8 @@ import Testing
                     actual = try model.score(features, at: vector.index)
                 }
                 #expect(actual.activeIndices == vector.active_indices)
-                #expect(abs(actual.logit - vector.logit) < 1e-12)
-                #expect(abs(actual.japaneseProbability - vector.p_ja) < 1e-12)
+                #expect((actual.logit - vector.logit).magnitude < 1e-12)
+                #expect((actual.japaneseProbability - vector.p_ja).magnitude < 1e-12)
             }
             for vector in parity.decoders {
                 #expect(try ViterbiLanguageDecoder.decode(vector.probabilities, switchPenalty: vector.switch_penalty) == vector.path)
