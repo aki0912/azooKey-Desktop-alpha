@@ -103,12 +103,12 @@ public struct LogisticLanguageModel: Sendable {
 
     public func score(_ features: AnchoredCharacterFeatures, at index: Int) throws -> LanguageScore {
         guard featureSpecVersion == AnchoredCharacterFeatures.version else { throw LanguageModelError.unsupportedVersion }
-        return try score(keys: features.keys(at: index))
+        return try score(keys: features.unsortedKeys(at: index))
     }
 
     public func score(_ features: ContextualCharacterFeatures, at index: Int) throws -> LanguageScore {
         guard featureSpecVersion == ContextualCharacterFeatures.version else { throw LanguageModelError.unsupportedVersion }
-        return try score(keys: features.keys(at: index))
+        return try score(keys: features.unsortedKeys(at: index))
     }
 
     private func score(keys: [String]) throws -> LanguageScore {

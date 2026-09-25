@@ -118,3 +118,29 @@ python3 Tools/collect_mixed_diagnostics.py --last 10m
 更新前には未確定入力を確定し、ABCへ切り替える。診断版はmacOSのUnified Loggingへ、モード通知、開始条件、自動／manualの配送先、capability、XPCの成功・失敗・切断、runtimeロード段階を記録する。プロセス間はランダムsession UUID、controller内はowner UUIDで対応づける。本文、キーの文字／キーコード、候補、文脈、入力のハッシュ、アプリ名、エラー全文、APIキーは記録しない。一般の既存debugログは有効化しない。
 
 既定ビルドではOFF。専用bundleの期限付きマーカーがあるMixedだけで有効になり、ビルドから24時間またはプロセス当たり10,000件で新規記録を停止する。既に記録したメタデータの保持期間はOSのログ管理に従う。回収先は `build/auto-mixed/diagnostics-events.jsonl`。診断後は `--diagnostics` なしで再ビルド・更新して無効化できる。
+
+## 長い未確定文の性能計測
+
+Mixed専用ビルドはReleaseが既定。`--configuration Debug` で調査用に切り替えられる。
+IMEと同梱ConverterServerは同じ構成で作成し、`Contents/Resources/mixed-build.json` に構成名を保存する。
+モデル・辞書・機能設定は構成によって変えない。Debugの依存エンジンによる標準出力は、従来どおりMixed実行時に破棄する。
+
+期限付き診断には、queue待ち・server actor待ち・日英判定・特徴量/LR/Viterbi・ローマ字解析・候補生成・表示反映の時間（µs）と、child作成/解放・候補要求・スコア評価・待機キー数を追加した。
+日英判定の総時間にはローマ字解析などの内訳が含まれるため、内訳を総時間に足し合わせない。
+`responseUS` は送信投入からIMKへの表示反映呼出し完了までで、ディスプレイの描画完了時刻ではない。
+本文・文脈・候補・そのハッシュを製品診断に保存しない。診断OFF時にはtraceを生成しない。
+
+再現用の `MixedLatencyBenchmarkTests` は、明示したモデル・実Zenzaiを使用し、固定の試験文を20/60/120/240文字、毎秒5/10/15キーで入力後、10文字削除・再入力する。
+`AUTO_MIXED_LATENCY_OUTPUT` にJSON出力先を指定した時だけ実行する。
+`AUTO_MIXED_RUNTIME_MODEL` と `AUTO_MIXED_ZENZAI_RESOURCES` も必要。
+比較用の候補表示ハッシュはこの固定例テストだけに保存し、利用者入力の診断には使用しない。
+到着予定時刻に従う直列replayのため、queueは打鍵の予定時刻から処理開始までの待ち時間、pendingは未処理の到着予定キー数。実IMK・実XPCの測定とは区別する。
+初回ロードは `coldUS` に分離し、各系列を確定後、child数0を検証する。
+`Tools/summarize_mixed_latency.py <report.json> ... --output <summary.json>` でp50/p95/p99・追いつき時間と表示一致を集計できる。
+`AUTO_MIXED_STRESS=1` の `MixedSessionReuseTests` は実Zenzaiで1,000回の入力・確定とqueue/child解放を検証する。
+
+最適化は1回の判定内の特徴量/スコア共有、推論で不要な特徴量文字列のソート省略、境界・文脈・設定が変わらない日本語区間の末尾編集でのchild再利用に限定する。
+公開する特徴量キーは従来のUTF-8順。推論はモデルの有効添字を従来どおりソートしてからFloat64で加算し、数値の順序を変えない。
+編集した区間の採用候補・トークンは失効し、読みが変わらない未完子音だけの変化では候補計算を省く。
+実Zenzaiのsessionには候補順位へ影響する履歴も含まれるため、読みが変わる場合は従来どおり作り直す。辞書のみの変換は末尾編集での再利用を維持する。実XPCでの順位退行を受けた計画差分と最終測定値はimplementation_statusを参照。
+分割・結合・言語変更・文脈/設定変更は該当childを作り直す。確定・取消・フォーカス終了時の解放を維持する。

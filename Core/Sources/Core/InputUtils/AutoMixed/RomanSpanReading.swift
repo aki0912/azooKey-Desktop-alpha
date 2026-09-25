@@ -76,6 +76,10 @@ struct RomanSpanReading {
     }
 
     static func parse(_ raw: String) -> Self? {
+        MixedPerformance.measure(.roman) { parseUnmeasured(raw) }
+    }
+
+    private static func parseUnmeasured(_ raw: String) -> Self? {
         // The admitted characters are each one scalar/grapheme. Hyphen normalization
         // changes neither count; arbitrary Unicode input must not use this mapping.
         guard !raw.isEmpty, raw.unicodeScalars.allSatisfy(isAdmitted) else { return nil }

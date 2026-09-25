@@ -30,14 +30,12 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
     public func segment(_ raw: String) throws -> [MixedSpan] {
         let source = TextOffsetMap(raw)
         guard source.scalarCount <= 4096 else { reset(); throw AutoMixedError.invalidRange }
-        let protected = ProtectedSpanDetector.detect(raw)
+        let evidence = try baseline.evidence(raw)
+        let protected = evidence.protection
         let protection = protected.scalars
-        let prior = try baseline.segment(raw)
+        let prior = try baseline.segment(raw, evidence: evidence)
         let unchangedPrefixCount = zip((previousRaw ?? "").unicodeScalars, raw.unicodeScalars).prefix { $0.0 == $0.1 }.count
-        let features = ContextualCharacterFeatures(raw, leftContext: context)
-        let scores = try protection.enumerated().map { index, kind in
-            kind == .inferred ? try model.score(features, at: index).japaneseProbability : 0.5
-        }
+        let scores = evidence.probabilities
         var scoresWithoutContext: [Double]?
         var nextEnglish: [EnglishRegion] = []
         var result: [MixedSpan] = []
@@ -66,9 +64,12 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                    lexicon.exactLevel(word) != nil || (end == source.scalarCount && lexicon.prefixLevel(word) != nil),
                    RomanSpanReading.parse(word)?.suffix.isEmpty != true {
                     if scoresWithoutContext == nil {
-                        let independent = ContextualCharacterFeatures(raw, leftContext: .unavailable)
-                        scoresWithoutContext = try protection.enumerated().map { index, kind in
-                            kind == .inferred ? try model.score(independent, at: index).japaneseProbability : 0.5
+                        scoresWithoutContext = try MixedPerformance.measure(.classification) {
+                            MixedPerformance.count(.scorePass)
+                            let independent = ContextualCharacterFeatures(raw, leftContext: .unavailable)
+                            return try protection.enumerated().map { index, kind in
+                                kind == .inferred ? try model.score(independent, at: index).japaneseProbability : 0.5
+                            }
                         }
                     }
                     english = isEnglish(word, range: range, scores: scoresWithoutContext!,

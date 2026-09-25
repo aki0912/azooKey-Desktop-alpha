@@ -164,20 +164,36 @@ import Foundation
             return
         }
         do {
-            let proposed = try segmenter.segment(buffer.text)
+            let proposed = try MixedPerformance.measure(.judgment) { try segmenter.segment(buffer.text) }
             try MixedMarkedTextRenderer.validate(spans: proposed, source: buffer.offsets)
             // Preserve explicit candidate choices for unchanged spans during suffix edits.
             // Central editing and remapping user overrides are the T6 editing layer.
-            spans = try proposed.map { span in
+            let suffixEdit = oldBuffer.text.unicodeScalars.starts(with: buffer.text.unicodeScalars)
+                || buffer.text.unicodeScalars.starts(with: oldBuffer.text.unicodeScalars)
+            var unchangedIDs = Set<UUID>()
+            spans = try proposed.enumerated().map { index, span in
                 if let previous = oldSpans.first(where: { $0.sourceRange == span.sourceRange && $0.kind == span.kind }),
                    try oldBuffer.offsets.slice(previous.sourceRange).unicodeScalars.elementsEqual(
                     buffer.offsets.slice(span.sourceRange).unicodeScalars
                    ) {
+                    unchangedIDs.insert(previous.id)
                     return previous
+                }
+                // Only the final, one-to-one Japanese run may grow/shrink. All
+                // preceding runs must be identical; splits/merges get fresh IDs.
+                if suffixEdit, proposed.count == oldSpans.count, index == proposed.count - 1,
+                   let previous = oldSpans.last, span.kind == .japaneseRoman,
+                   previous.kind == .japaneseRoman,
+                   previous.sourceRange.lowerBound == span.sourceRange.lowerBound,
+                   previous.sourceRange.upperBound == oldBuffer.offsets.scalarCount,
+                   span.sourceRange.upperBound == buffer.offsets.scalarCount,
+                   oldSpans.dropLast().allSatisfy({ unchangedIDs.contains($0.id) }) {
+                    return MixedSpan(id: previous.id, sourceRange: span.sourceRange, kind: span.kind)
                 }
                 return span
             }
-            accepted = accepted.filter { id, _ in spans.contains(where: { $0.id == id }) }
+            // Session continuity is not permission to keep an adopted candidate.
+            accepted = accepted.filter { id, _ in unchangedIDs.contains(id) }
             try refreshCandidates()
         } catch {
             segmenter.reset()

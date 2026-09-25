@@ -37,6 +37,20 @@ import Testing
         #expect(MixedDiagnostics.kind(.key(.init(modifierFlags: [], characters: "", charactersIgnoringModifiers: "", keyCode: 102))) == .romanKey)
     }
 
+    @Test func performancePayloadContainsOnlyNumericDurationsAndCounters() throws {
+        let trace = MixedPerformance.Trace()
+        MixedPerformance.$trace.withValue(trace) {
+            MixedPerformance.measure(.roman) { MixedPerformance.count(.sessionCreated) }
+        }
+        let payload = try #require(MixedDiagnostics.encoded(.performance, MixedDiagnostics.performanceFields(trace.snapshot())))
+        let object = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
+        let fields = try #require(object["fields"] as? [String: Any])
+        #expect(fields.values.allSatisfy { $0 is NSNumber })
+        #expect(fields["sessionCreated"] as? Int == 1)
+        #expect(fields["sessionReleased"] as? Int == 0)
+        #expect(MixedPerformance.trace == nil)
+    }
+
     @Test func unmarkedTestBundleDoesNotEnableDiagnostics() {
         #expect(!MixedDiagnostics.enabled)
     }

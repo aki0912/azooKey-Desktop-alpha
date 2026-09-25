@@ -25,21 +25,28 @@ public struct AnchoredCharacterFeatures: Sendable {
     }
 
     public func keys(at index: Int) throws -> [String] {
+        try unsortedKeys(at: index).sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+    }
+
+    /// Scoring sorts the model indices before summation; sorting these strings too
+    /// is redundant. Family/offset/length identify every key uniquely.
+    func unsortedKeys(at index: Int) throws -> [String] {
         guard (0..<scalarCount).contains(index) else {
             throw AutoMixedError.invalidRange
         }
-        var keys = Set<String>()
+        var keys: [String] = []
+        keys.reserveCapacity(61)
         for offset in -8...8 {
-            keys.insert("[\"char\",\(offset),\(symbol(at: index + offset))]")
-            keys.insert("[\"shape\",\(offset),\"\(shape(at: index + offset))\"]")
+            keys.append("[\"char\",\(offset),\(symbol(at: index + offset))]")
+            keys.append("[\"shape\",\(offset),\"\(shape(at: index + offset))\"]")
         }
         for length in 2...4 {
             for start in -4...4 {
                 let window = (0..<length).map { symbol(at: index + start + $0) }.joined(separator: ",")
-                keys.insert("[\"ngram\",\(length),\(start),[\(window)]]")
+                keys.append("[\"ngram\",\(length),\(start),[\(window)]]")
             }
         }
-        return keys.sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+        return keys
     }
 
     private func symbol(at position: Int) -> String {

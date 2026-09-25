@@ -12,12 +12,35 @@ public struct ContextualLanguageSegmenter: ContextualLanguageJudging, Sendable {
         self.thresholds = thresholds
     }
 
-    public func judge(_ input: LanguageJudgmentInput) throws -> LanguageJudgment {
-        let features = ContextualCharacterFeatures(input.raw, leftContext: input.leftCommittedContext)
-        let protection = ProtectedSpanDetector.detect(input.raw)
-        let probabilities = try protection.scalars.enumerated().map { index, policy in
-            policy == .inferred ? try model.score(features, at: index).japaneseProbability : 0.5
+    /// Internal lifetime is exactly one judgment. Never store this across edits.
+    struct Evidence {
+        let protection: ProtectedText
+        let probabilities: [Double]
+    }
+
+    func evidence(_ input: LanguageJudgmentInput) throws -> Evidence {
+        try MixedPerformance.measure(.classification) {
+            MixedPerformance.count(.scorePass)
+            let features = ContextualCharacterFeatures(input.raw, leftContext: input.leftCommittedContext)
+            let protection = ProtectedSpanDetector.detect(input.raw)
+            let probabilities = try protection.scalars.enumerated().map { index, policy in
+                policy == .inferred ? try model.score(features, at: index).japaneseProbability : 0.5
+            }
+            return Evidence(protection: protection, probabilities: probabilities)
         }
+    }
+
+    public func judge(_ input: LanguageJudgmentInput) throws -> LanguageJudgment {
+        try judge(input, evidence: evidence(input))
+    }
+
+    func judge(_ input: LanguageJudgmentInput, evidence: Evidence) throws -> LanguageJudgment {
+        try MixedPerformance.measure(.classification) { try decode(input, evidence: evidence) }
+    }
+
+    private func decode(_ input: LanguageJudgmentInput, evidence: Evidence) throws -> LanguageJudgment {
+        let protection = evidence.protection
+        let probabilities = evidence.probabilities
         let labels = try ViterbiLanguageDecoder.decodeBlocks(
             probabilities, protections: protection.scalars, switchPenalty: model.switchPenalty
         )

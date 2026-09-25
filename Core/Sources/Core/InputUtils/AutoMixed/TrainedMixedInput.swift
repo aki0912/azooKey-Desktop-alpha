@@ -15,12 +15,24 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     }
 
     public func segment(_ raw: String) throws -> [MixedSpan] {
+        try segment(raw, evidence: evidence(raw))
+    }
+
+    func evidence(_ raw: String) throws -> ContextualLanguageSegmenter.Evidence {
+        try judge.evidence(input(raw))
+    }
+
+    private func input(_ raw: String) -> LanguageJudgmentInput {
+        LanguageJudgmentInput(raw: raw, leftCommittedContext: context, focusIdentity: focus, revision: 0)
+    }
+
+    func segment(_ raw: String, evidence: ContextualLanguageSegmenter.Evidence) throws -> [MixedSpan] {
         let source = TextOffsetMap(raw)
-        var proposed = try hypotheses(raw)
+        var proposed = try judge.judge(input(raw), evidence: evidence).hypotheses
         if let last = proposed.last, last.kind == .unresolved {
-            if try admitsPendingTail(raw, source: source, span: last) {
+            if try admitsPendingTail(raw, source: source, span: last, evidence: evidence) {
                 proposed[proposed.count - 1] = MixedSpan(id: last.id, sourceRange: last.sourceRange, kind: .japaneseRoman)
-            } else if let split = try kanaTail(raw, source: source, span: last) {
+            } else if let split = try kanaTail(raw, source: source, span: last, evidence: evidence) {
                 proposed.removeLast()
                 proposed.append(contentsOf: split)
             }
@@ -41,15 +53,12 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     }
 
     /// Complete but less certain kana gets a reading-only tail, never a guessed kanji candidate.
-    private func kanaTail(_ raw: String, source: TextOffsetMap, span: MixedSpan) throws -> [MixedSpan]? {
+    private func kanaTail(_ raw: String, source: TextOffsetMap, span: MixedSpan, evidence: ContextualLanguageSegmenter.Evidence) throws -> [MixedSpan]? {
         guard let thresholds = model.contextualThresholds,
               span.sourceRange.upperBound == source.scalarCount,
               let split = RomanSpanReading.splitFinalKana(try source.slice(span.sourceRange)) else { return nil }
         let end = span.sourceRange.lowerBound + split.prefix.unicodeScalars.count
-        let features = ContextualCharacterFeatures(raw, leftContext: context)
-        let scores = try (span.sourceRange.lowerBound..<span.sourceRange.upperBound).map {
-            try model.score(features, at: $0).japaneseProbability
-        }
+        let scores = Array(evidence.probabilities[span.sourceRange.lowerBound..<span.sourceRange.upperBound])
         guard scores.allSatisfy({ $0 >= thresholds.minimumJapanese }) else { return nil }
         let prefixScores = scores.prefix(split.prefix.unicodeScalars.count)
         let enter = context.isAvailable ? model.enterJapaneseThreshold : thresholds.enterWithoutContext
@@ -68,7 +77,7 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     }
 
     /// A single bounded prefix check, also valid for pasted raw. No previous display is trusted.
-    private func admitsPendingTail(_ raw: String, source: TextOffsetMap, span: MixedSpan) throws -> Bool {
+    private func admitsPendingTail(_ raw: String, source: TextOffsetMap, span: MixedSpan, evidence: ContextualLanguageSegmenter.Evidence) throws -> Bool {
         guard let thresholds = model.contextualThresholds,
               span.sourceRange.upperBound == source.scalarCount,
               let parsed = RomanSpanReading.parse(try source.slice(span.sourceRange)),
@@ -76,10 +85,9 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
 
         // Check current evidence before removing the unfinished suffix. A previous Japanese
         // prefix must not override new RAW evidence, a hard protection, or low confidence.
-        let features = ContextualCharacterFeatures(raw, leftContext: context)
         let floor = max(model.holdJapaneseThreshold, thresholds.minimumJapanese)
         for index in span.sourceRange.lowerBound..<span.sourceRange.upperBound {
-            guard try model.score(features, at: index).japaneseProbability >= floor else { return false }
+            guard evidence.probabilities[index] >= floor else { return false }
         }
 
         let end = span.sourceRange.lowerBound + parsed.prefix.unicodeScalars.count

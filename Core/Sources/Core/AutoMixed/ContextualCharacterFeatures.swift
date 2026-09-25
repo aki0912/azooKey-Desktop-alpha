@@ -12,7 +12,11 @@ public struct ContextualCharacterFeatures: Sendable, CustomDebugStringConvertibl
     }
 
     public func keys(at index: Int) throws -> [String] {
-        try (rawFeatures.keys(at: index) + contextKeys).sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+        try unsortedKeys(at: index).sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
+    }
+
+    func unsortedKeys(at index: Int) throws -> [String] {
+        try rawFeatures.unsortedKeys(at: index) + contextKeys
     }
 
     public var debugDescription: String { "ContextualCharacterFeatures(<redacted>)" }

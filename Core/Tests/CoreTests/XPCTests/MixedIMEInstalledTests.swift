@@ -64,6 +64,44 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_STRESS"] == "1"))
+    func installedHelperAcknowledgesThousandCompositions() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-latency-stress-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        var focus = UUID(), operation: UInt64 = 0
+        var startsFocus = true
+        func send(_ action: AutoMixedAction) async throws -> ConverterServerResponse {
+            operation += 1
+            let command = ConverterServerCommand.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: startsFocus, action: action)))
+            startsFocus = false
+            return try await probe.send(command)
+        }
+        let start = DispatchTime.now().uptimeNanoseconds
+        for index in 0..<1000 {
+            for text in ["asita", "n"] {
+                let response = try await send(.key(.init(modifierFlags: [], characters: text,
+                    charactersIgnoringModifiers: text, keyCode: 0)))
+                #expect(response.autoMixed?.status == .ready)
+                #expect(response.snapshot.markedText.elements.map(\.content).joined() == (text == "n" ? "明日n" : "明日"))
+            }
+            let commit = try #require(try await send(.commit).autoMixed?.commits.first)
+            #expect(commit.text == "明日n")
+            let ack = try await send(.commitApplied(commit.commitID))
+            #expect(ack.autoMixed?.commits.isEmpty == true)
+            #expect(ack.autoMixed?.raw.isEmpty == true)
+            if index % 100 == 99 {
+                _ = try await send(.deactivate)
+                focus = UUID(); startsFocus = true
+            }
+        }
+        print("Real Mach XPC stress: 1000 compositions, microseconds=\((DispatchTime.now().uptimeNanoseconds - start) / 1000)")
+        try await probe.close(session)
+    }
+
     @Test func installedHelperConvertsLongVowelWordsAndKeepsOriginalRanges() async throws {
         let probe = MixedIMEProbe()
         let session = "installed-long-vowel-probe-" + UUID().uuidString

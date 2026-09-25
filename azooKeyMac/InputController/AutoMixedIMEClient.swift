@@ -21,6 +21,7 @@ extension ConverterServerClient: AutoMixedCommandSending {}
     private var activation = UUID()
     private weak var origin: AnyObject?
     private var pending = 0
+    private var pendingKeys = 0
     private var lastMixed: AutoMixedResponse?
     private var lastDisplayed = ""
     private var negotiating = false
@@ -47,6 +48,7 @@ extension ConverterServerClient: AutoMixedCommandSending {}
         negotiating = false
         bufferedKeys = []
         pending = 0
+        pendingKeys = 0
         startsFocus = true
         lastMixed = nil
         lastDisplayed = ""
@@ -152,6 +154,7 @@ extension ConverterServerClient: AutoMixedCommandSending {}
         active = false
         negotiating = false
         bufferedKeys = []
+        pendingKeys = 0
         activation = UUID()
         origin = nil
         ledger.deactivate()
@@ -165,9 +168,15 @@ extension ConverterServerClient: AutoMixedCommandSending {}
         let request = AutoMixedRequest(serverEpoch: capability.serverEpoch, focusID: ledger.focusID,
             operationID: operationID, startsFocus: startsFocus, context: context, action: action)
         startsFocus = false
-        if case .key(let key) = action { ledger.recordKey(key, operationID: operationID) }
+        if case .key(let key) = action {
+            ledger.recordKey(key, operationID: operationID)
+            pendingKeys += 1
+            MixedDiagnostics.record(.keyQueued, [.owner: .id(diagnosticID), .focus: .id(request.focusID),
+                .operation: .number(Int(clamping: request.operationID)), .pendingKeys: .number(pendingKeys)])
+        }
         pending += 1
         let generation = activation
+        let enqueued = MixedDiagnostics.enabled ? DispatchTime.now().uptimeNanoseconds : nil
         // A cold GGUF/Metal initialization can exceed the legacy one-second timeout.
         server.send({ _ in .autoMixed(request) }, timeout: 5) { [weak self] response in
             guard let self else { return }
@@ -184,6 +193,7 @@ extension ConverterServerClient: AutoMixedCommandSending {}
             }
             MixedDiagnostics.record(.clientReply, diagnostic)
             self.pending = max(0, self.pending - 1)
+            if case .key = action { self.pendingKeys = max(0, self.pendingKeys - 1) }
             guard let response, let mixed = response.autoMixed,
                   self.ledger.accepts(mixed), mixed.status != .restartRequired,
                   mixed.status != .unavailable, mixed.status != .unsupportedInputStyle else {
@@ -202,7 +212,15 @@ extension ConverterServerClient: AutoMixedCommandSending {}
             if self.ledger.acceptSnapshot(mixed) {
                 self.lastMixed = mixed
                 self.lastDisplayed = response.snapshot.markedText.elements.map(\.content).joined()
+                let renderStart = enqueued.map { _ in DispatchTime.now().uptimeNanoseconds }
                 self.render(response)
+                if let enqueued, let renderStart {
+                    let applied = DispatchTime.now().uptimeNanoseconds
+                    MixedDiagnostics.record(.displayApplied, [.owner: .id(self.diagnosticID),
+                        .focus: .id(request.focusID), .operation: .number(Int(clamping: request.operationID)),
+                        .pending: .number(self.pending), .pendingKeys: .number(self.pendingKeys), .responseUS: .number(Int((applied - enqueued) / 1000)),
+                        .renderUS: .number(Int((applied - renderStart) / 1000))])
+                }
             }
             if mixed.status == .inputLimit || mixed.status == .awaitingAcknowledgement { NSSound.beep() }
         }

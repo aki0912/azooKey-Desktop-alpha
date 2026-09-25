@@ -91,7 +91,10 @@ def sign_app(app):
     run("codesign", "--verify", "--deep", "--strict", app)
 
 
-def build(model, resources, diagnostics=False):
+def build(model, resources, diagnostics=False, configuration="Release"):
+    if configuration not in {"Release", "Debug"}:
+        raise ValueError("Expected Release or Debug configuration")
+    swift_configuration = configuration.lower()
     model, resources = model.resolve(), resources.resolve()
     OUTPUT.mkdir(parents=True, exist_ok=True)
     write_plist(OUTPUT / "Info.plist", profile_info())
@@ -100,16 +103,16 @@ def build(model, resources, diagnostics=False):
     env = dict(os.environ, CLANG_MODULE_CACHE_PATH=str(BUILD / "clang-cache"),
                SWIFTPM_MODULECACHE_OVERRIDE=str(BUILD / "swift-cache"))
     run("swift", "build", "--package-path", "Core", "--scratch-path", BUILD / "core",
-        "--cache-path", BUILD / "cache", "--disable-sandbox", "--build-system", "native", "--product", "ConverterServer", env=env)
+        "--cache-path", BUILD / "cache", "--disable-sandbox", "--build-system", "native", "--product", "ConverterServer", "--configuration", swift_configuration, env=env)
     with temporary_resources(resources):
         run("xcodebuild", "build", "-project", "azooKeyMac.xcodeproj", "-scheme", "azooKeyMac",
-            "-configuration", "Debug", "-destination", "platform=macOS,arch=arm64",
+            "-configuration", configuration, "-destination", "platform=macOS,arch=arm64",
             "-derivedDataPath", BUILD / "mixed-derived", "-clonedSourcePackagesDirPath", BUILD / "xcode-packages",
             "-disableAutomaticPackageResolution", "CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO",
             "ENABLE_APP_SANDBOX=NO", "ENABLE_HARDENED_RUNTIME=NO", "ENABLE_DEBUG_DYLIB=NO", "ENABLE_PREVIEWS=NO",
             "AZOOKEY_APP_PRODUCT_NAME=azooKeyMixed", "AZOOKEY_APP_BUNDLE_IDENTIFIER=" + BUNDLE_ID,
             "AZOOKEY_APP_INFO_PLIST=" + str(OUTPUT / "Info.plist"),
-            "AZOOKEY_PREBUILT_CONVERTER_SERVER_DIR=" + str(BUILD / "core/debug"), env=env)
+            "AZOOKEY_PREBUILT_CONVERTER_SERVER_DIR=" + str(BUILD / "core" / swift_configuration), env=env)
     app = OUTPUT / "azooKeyMixed.app"
     if app.is_symlink():
         raise ValueError("Refusing to replace an app symlink")
@@ -118,8 +121,9 @@ def build(model, resources, diagnostics=False):
         if old.get("CFBundleIdentifier") != BUNDLE_ID:
             raise ValueError("Refusing to replace another app")
         shutil.rmtree(app)
-    run("ditto", BUILD / "mixed-derived/Build/Products/Debug/azooKeyMixed.app", app)
+    run("ditto", BUILD / "mixed-derived/Build/Products" / configuration / "azooKeyMixed.app", app)
     prepare(app, model, resources)
+    (app / "Contents/Resources/mixed-build.json").write_text(json.dumps({"configuration": configuration}))
     for language in ["ja", "en"]:
         write_plist(app / "Contents/Resources" / (language + ".lproj") / "InfoPlist.strings", {
             "CFBundleName": "azooKey Mixed", "CFBundleDisplayName": "azooKey Mixed",
@@ -142,5 +146,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=Path, default=BUILD / "independent-thresholds-refined-20260924/export/model.json")
     parser.add_argument("--resources", type=Path, default=BUILD / "runtime-resources")
     parser.add_argument("--diagnostics", action="store_true", help="State-only unified logs for at most 24 hours / 10,000 events per process")
+    parser.add_argument("--configuration", choices=["Release", "Debug"], default="Release",
+                        help="Build both the IME and converter helper with this configuration (default: Release)")
     args = parser.parse_args()
-    build(args.model, args.resources, diagnostics=args.diagnostics)
+    build(args.model, args.resources, diagnostics=args.diagnostics, configuration=args.configuration)
