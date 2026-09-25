@@ -1784,3 +1784,26 @@ Mixed専用Releaseのビルド・署名検証、専用updateのdry-runと更新�
 更新前後のMixedモード状態JSONは一致した。選択中ソースは開始時がmacOS標準日本語、終了時がABCで、一致を要求した確認スクリプトのassertionは失敗した。今回のツール操作に入力ソースの選択命令はなく、専用updateも選択中Mixedを検出すると停止する方式。切替の原因は未確認であり、前後の選択ソースまで同一だったとは報告しない。選択を強制的に戻す操作は行っていない。hash・構成・診断・Mixedモード状態の検証はそれぞれ成功。
 
 macOS 27 arm64／Xcode 27／Swift 6.4。既存のSwiftPM native非推奨・依存deployment target警告あり。物理打鍵・実アプリ欄の確認、性能計測、SwiftLintは未実行。実XPCの成功とは区別する。コード・回帰試験・Mixed反映は完了、差分は未コミット。
+
+
+## Tabで詳細候補を生成し「13階」を選びやすくする（2026-09-25）
+
+利用者の承認した方針に従い、Mixedの候補一覧を開く際だけZenzaiの `requestRichCandidates` を有効にする。`13kai` は従来どおり数字literal＋日本語romanに分割し、`13` を左文脈として `kai` を変換する。入力中の計算、モデル・閾値・数字保護、辞書、XPC schema、通常版/manualは変更しない。「階」を特別扱いする辞書追加・順位固定は行わない。
+
+- 新設 `JapaneseSpanConverting.selectionCandidates` は任意機能で、既定nilは既存候補を維持する。MixedSessionConverterは一覧を開く時だけ既存の `JapaneseSpanRequest.rich` をtrueとして要求。既存依存APIの詳細候補生成へ接続し、新設APIを依存の既存APIとは扱わない。
+- 対象の日本語区間だけを再取得する。左文脈は実際の前方表示からUTF-16境界で取得し、他の区間の表示・採用候補を維持。一覧内のTab/Shift-Tabは既存一覧を移動するだけで追加計算しない。Escape原文表示から一覧を開く場合も追加変換しない。
+- 詳細生成によりpreview tokenが無効になるため、採用済み候補は同じ表記の新候補へ結び直す。編集・取消・確定時の候補失効とchild解放は維持。古いrevisionの候補選択を拒否する実XPC試験を追加した。
+- 利用者提示の固定例 `13kai` を実Zenzaiで1文字ずつ入力し、入力中「13回」、Tabの候補先頭が「回」「階」、選択・確定が「13階」となることを検証。単発の一覧表示用候補生成は21.252msだったが、p95/p99や実IMKの応答時間ではなく、性能目標達成とは扱わない。
+
+ログは `build/auto-mixed/rich-candidates-20260925/`。関連Core試験 **35件・6 suite成功、skipなし、3.003秒**（`core.log`）。実Zenzaiの2位表示、追加候補要求1回・一覧内移動時0回、再表示時の同一rich要求キャッシュ、古いtoken拒否、選択採用後の再表示、UTF-16を含む前方表示、Shift-Tab、Escape、失敗時のraw保持、読み単位削除・再入力、child解放、既存句読点とtransport回帰を確認。既存の期待値は弱めていない。
+
+初回ビルドは、並行して実XPC試験ファイルを追記したためSwiftの「ビルド中に入力ファイルが変更された」検査で中断（`build-interrupted.log`）。編集を完了した状態で再実行し成功。テスト動作の失敗とは区別する。ユーザーの本文・確定文脈は採取しておらず、固定fixtureの試験では学習OFF。
+
+
+Mixed専用Releaseビルド、更新前検証、専用update、導入先のdeep strict署名検証が成功（`build.log`／`update-dry-run.log`／`update.log`／`signature.log`）。ビルド先・導入先のapp/helper/モデル/3アイコンSHA一致。app SHAは `e5ca8076bc458b6a1a3e022dcc7df39dda5b4c941a29ee733bed6591c143fc8b`、helper SHAは `41854df9d5ddd3e1d0128c3ff2d429950aa67f4dca3c3239decdcf17e8b8078b`。モデル・アイコンは更新前と同一、IME/helperともRelease、診断OFF。旧Mixedの復旧用コピーを保存し、通常版・登録・有効状態は変更していない。
+
+**更新済み実Mach XPC試験9件成功、skipなし、24.081秒**（`installed.log`）。新規の固定例13kai試験は1.336秒で成功し、「回」「階」の順、2番目選択による「13階」の表示・確定、古いrevision拒否、確定ack後の空raw、候補選択中Backspaceによる「13か」を検証した。既存の読み単位削除、句読点継続、丸括弧、apple、長音、不成立ローマ字、確定重複排除、1,000回入力・確定・ackも成功。実アプリの利用者入力を使わず隔離sessionで実行した。
+
+更新前後のMixedモード状態JSONは一致。選択ソースの観測値は開始時macOS標準日本語、終了時ABC。今回も入力ソース選択命令は実行していないが、切替原因は確認できていないため、選択ソースが同一だったとは記載しない。利用者の選択を強制的に戻す操作はしていない。
+
+macOS 27 arm64／Xcode 27／Swift 6.4で検証。既存のSwiftPM native非推奨・依存deployment target警告は残る。実アプリの物理打鍵、候補一覧表示の分布を用いた性能評価、SwiftLintは未実行。成功した実XPC試験とは区別する。コード・回帰試験・Mixed反映は完了。差分空白検査成功、未コミット。Mixed自動で13kaiを入力してTabで候補一覧を開き、2番目を選べる状態。

@@ -134,6 +134,14 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     }
 
     public func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate] {
+        try candidates(for: raw, span: span, leftDisplay: leftDisplay, rich: false)
+    }
+
+    public func selectionCandidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate]? {
+        try candidates(for: raw, span: span, leftDisplay: leftDisplay, rich: true)
+    }
+
+    private func candidates(for raw: String, span: MixedSpan, leftDisplay: String, rich: Bool) throws -> [MixedCandidate] {
         if span.kind == .japaneseKana {
             // Reading-only tails create no converter child or learnable Candidate token.
             guard span.sourceRange.count == raw.unicodeScalars.count,
@@ -150,7 +158,7 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
         let result = try bridge.candidates(for: JapaneseSpanRequest(
             identity: .init(sessionID: sessionID, compositionID: compositionID, spanID: span.id, revision: revision),
             sourceRange: span.sourceRange, raw: raw, leftContext: left, rightContext: rightContext,
-            isAtBufferEnd: span.sourceRange.upperBound == sourceScalarCount
+            rich: rich, isAtBufferEnd: span.sourceRange.upperBound == sourceScalarCount
         ))
         lastResults[span.id] = result
         return result.candidates

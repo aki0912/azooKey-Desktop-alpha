@@ -64,6 +64,47 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test func installedHelperEnumeratesFloorSecondWhenOpeningCandidates() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-rich-candidates-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, context: .init(leftSideContext: ""), action: action))))
+        }
+        func key(_ text: String, code: UInt16 = 0) async throws -> ConverterServerResponse {
+            try await send(.key(.init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: code)))
+        }
+        for character in "13kai" { _ = try await key(String(character)) }
+        let list = try await key("\t", code: 48)
+        #expect(list.autoMixed?.raw == "13kai")
+        #expect(list.autoMixed?.status == .ready)
+        guard case .selecting(let candidates, _) = list.snapshot.candidateWindow else {
+            Issue.record("Expected rich candidate list"); try await probe.close(session); return
+        }
+        #expect(candidates.prefix(2).map(\.text) == ["回", "階"])
+        let revision = try #require(list.autoMixed?.revision)
+        let adopted = try await send(.selectCandidate(index: 1, revision: revision, adopt: true))
+        #expect(adopted.snapshot.markedText.elements.map(\.content).joined() == "13階")
+        #expect(try await send(.selectCandidate(index: 0, revision: revision, adopt: true)).autoMixed?.status == .staleRequest)
+        let committed = try #require(try await send(.commit).autoMixed?.commits.first)
+        #expect(committed.text == "13階")
+        #expect(try await send(.commitApplied(committed.commitID)).autoMixed?.raw.isEmpty == true)
+        for character in "13kai" { _ = try await key(String(character)) }
+        _ = try await key("\t", code: 48)
+        _ = try await key("\t", code: 48)
+        let deleted = try await key("\u{7f}", code: 51)
+        #expect(deleted.snapshot.markedText.elements.map(\.content).joined() == "13か")
+        #expect(deleted.autoMixed?.raw == "13ka")
+        _ = try await send(.deactivate)
+        try await probe.close(session)
+    }
+
     @Test func installedHelperDeletesReadingUnitsAndResumesConversion() async throws {
         let probe = MixedIMEProbe()
         let session = "installed-reading-backspace-" + UUID().uuidString

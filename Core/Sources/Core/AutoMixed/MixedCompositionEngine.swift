@@ -142,6 +142,28 @@ import Foundation
         guard let span = spans.last(where: { $0.kind == .japaneseRoman }) ?? spans.last else {
             return
         }
+        if state != .rawPreview, !usedRawFallback, span.kind == .japaneseRoman {
+            let marked = try markedText()
+            guard let offset = marked.displayOffset(forRawScalar: span.sourceRange.lowerBound) else {
+                throw AutoMixedError.invalidRange
+            }
+            let leftDisplay = (marked.text as NSString).substring(to: offset)
+            converter.prepare(revision: revision, sourceScalarCount: buffer.offsets.scalarCount,
+                              retaining: Set(spans.filter { $0.kind == .japaneseRoman }.map(\.id)))
+            if let options = try converter.selectionCandidates(for: buffer.offsets.slice(span.sourceRange),
+                                                               span: span, leftDisplay: leftDisplay) {
+                guard !options.isEmpty,
+                      options.allSatisfy({ !$0.text.isEmpty && !$0.token.isEmpty }),
+                      Set(options.map(\.token)).count == options.count else {
+                    throw AutoMixedError.invalidCandidate
+                }
+                // Rich requests invalidate preview tokens. Preserve an explicit choice
+                // only by rebinding its text to a candidate from the new response.
+                let chosenText = accepted[span.id]?.text
+                accepted[span.id] = options.first { $0.text == chosenText }
+                candidates[span.id] = options
+            }
+        }
         selectionFromRawPreview = state == .rawPreview
         selectingSpanID = span.id
         if !selectionFromRawPreview, let options = candidates[span.id], !options.isEmpty {

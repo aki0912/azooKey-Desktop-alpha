@@ -92,6 +92,8 @@ public extension LanguageSegmenter {
     func candidates(for raw: String, span: MixedSpan) throws -> [MixedCandidate]
     func prepare(revision: UInt64, sourceScalarCount: Int, retaining spanIDs: Set<UUID>)
     func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate]
+    /// Optional richer enumeration when opening selection, never on each inserted key.
+    func selectionCandidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate]?
     func finishComposition()
 }
 
@@ -101,6 +103,7 @@ public extension JapaneseSpanConverting {
         try candidates(for: raw, span: span)
     }
     func finishComposition() {}
+    func selectionCandidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate]? { nil }
 }
 
 public enum MixedCompositionState: Sendable, Equatable {
