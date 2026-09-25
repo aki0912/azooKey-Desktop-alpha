@@ -1843,3 +1843,45 @@ Mixed専用Releaseビルド・署名検証、専用updateのdry-runと更新が�
 macOS 27 arm64／Xcode 27／Swift 6.4。既存のSwiftPM native非推奨・依存deployment target警告は残る。実アプリでの物理打鍵、追加の対照判定による長文p95/p99への影響、SwiftLintは未実行。実XPCの成功や1,000回確定試験で、物理打鍵・性能目標達成を代用しない。未知語や曖昧語をすべて判別できるという主張もしない。
 
 実装・回帰・Mixed反映は完了。差分空白検査成功、差分は未コミット。Mixed自動へ切り替えて試用できる。次の確認項目は実アプリの物理打鍵と長文の追加判定コスト。
+
+
+## 完成した日本語読みの末尾結合（2026-09-25）
+
+開始HEADは `c4847dd`（Preserve English boundaries before Japanese long vowels）、開始時のworking treeはclean。利用者の `kaihatu → 開発` が1位にならない問題に対応。先行調査では、左文脈取得不可で `kaiha` ＋ `tu` に分かれ、変換エンジンへ「かいはつ」が届かないことを通常辞書・実Zenzaiで確認した。直接変換なら双方で開発が1位。今回のログは `build/auto-mixed/complete-reading-20260925/`。
+
+### 変更と仕様差分
+
+- Mixedの `JapanesePreferredSegmenter` のみ変更。英語・保護・長音の判定後、全体が漢字変換可能な読みで、隣接する japaneseRoman ＋ japaneseKana の2区間が全体を覆い、双方の完成した読みの連結が全体の読みと一致し、末尾の全位置が既存の `max(hold_ja, minimum_ja)` 以上の場合だけ一つの変換区間へ戻す。新しい閾値や語別例外は設けない。
+- 「既存の漢字／かな境界を維持」から、十分な根拠がある完成末尾を再評価するという仕様差分。末尾のスコア平均だけでは結合せず、弱い位置を前方の高スコアで覆い隠さない。言語の確信度の境界を変換対象の境界に固定することを避ける。設計書03章§11.7と04章§3.3に理由・条件・影響を追記。
+- 凍結判定器、特徴量・LR・Viterbi・モデル係数・閾値値・モデルschema、通常版/manual、辞書・XPCは不変。原文を変更せず、現在rawと既存スコアのみ使用する。追加のモデル推論はなく、読みの整合性を追加検証する。候補の順位固定は行わない。
+
+### 検証と途中の失敗
+
+- 新規の修正前試験は3件・29 assertion失敗、2.140秒（`before.log`）。このうち20項目は対象不具合。残り9項目は新規試験側の前提誤りで、現行モデルでもasitanote/ashitanoteが必ず2区間になるという8項目と、末尾未完英字を持つkaihatuxが一つの日本語spanになってはいけないという1項目。実際には現行モデルのasitanoteは全体変換となり得て、未完suffixを含むspanも既存仕様で許可される。誤った構造の期待を削除し、既存のasitanote表示・asitanx回帰と、人工スコアによる弱いかな末尾保持の試験で契約を確認した。「開発」1位、全体span、編集・確定の期待は弱めていない。
+- 最初の広域回帰は48件中4件で21 assertion失敗、1件skip、28.268秒（`core.log`）。修正ファイルを退避してHEAD版へ戻し、同じモデル・資源・試験で対照実行したところ、**同じ4試験・同じ21 assertionが失敗**（7件実行、0.492秒、`head-control.log`）。失敗位置・期待式・回数の完全一致を `existing-failure-comparison.json` に保存。終了後に修正版を復元した。
+- 既存失敗の内訳はKanaTailTestsの旧モデル向け区間／候補期待3試験18項目と、MixedSessionReuseTestsのTabを挟んだ候補・session回数期待1試験3項目。後者は固定のOneJapaneseRunを使い、今回変更したsegmenterを呼ばない。これらの既存テスト・期待値は変更しておらず、全テスト成功とは扱わない。1,000回試験は有効化環境変数を指定していないためskip。
+- 修正後の関連回帰は **64件・11 suite成功、skipなし、33.658秒**（`core-final.log`）。通常辞書と実Zenzaiを別試験として、左文脈取得不可／取得済み空文字／固定日本語文脈でkaihatu/kaihatsuの逐次入力・一括入力、「開発」先頭、Tab候補、読みBackspace、再入力、確定、Escape原文確定、候補採用後の編集とchild解放を確認。実Zenzaiはbackend readyを要求し、学習OFF。
+- 既存のapple、meeting、sampleのデータ、句読点継続、記号、長音、asitanx、不成立ローマ字、読み削除、13階詳細候補、Unicode表示範囲と状態遷移も上記64件に含む。弱い末尾の人工対照では、平均がhold以上でも1位置がhold未満なら結合しないことを確認。固定の利用者提示例と自作fixtureのみ使用し、実アプリの本文・確定文脈は収集していない。
+
+- 凍結v1/v2 golden、特徴量・LR・Viterbi、Python参照値、fixture／承認済みexport、原文・保護範囲・session連続性は **32件・8 suite成功、skipなし、0.159秒**（`parity-final.log`）。数値誤差1e-12未満の既存条件を維持。初回は承認済みexportの環境変数へv2だけを指定したため、v1/v2双方を要求する1項目が失敗した（`parity.log`、32件・1 issue、0.147秒）。v1 exportも指定し直して成功。試験コードや期待値は変更していない。Python参照データは既存成果物を再利用し、再学習・参照データの再生成はしていない。
+
+### 現在の状態・未実行事項
+
+macOS 27 arm64／Xcode 27／Swift 6.4のRelease構成で検証。依存の既存deployment target・SwiftPM native非推奨等の警告は残る。現行モデルSHAは `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22` のまま。
+
+今回の変更に対するCore実装・通常辞書・実Zenzai・数値回帰は完了。全試験成功とはせず、上記のHEADでも再現する既存4試験の失敗を残している。IME専用アプリのパッケージビルド・インストール更新・実Mach XPC・実アプリ物理打鍵・1,000回ストレス・長文性能・SwiftLintは今回未実行。通常版／Mixed版ともインストール、削除、入力ソース登録を変更していない。追加の読み検証コストや一般的な未知語精度を改善済みとは主張しない。
+
+差分空白検査成功、未コミット。次は必要に応じてMixed専用Releaseのビルド・安全な更新と実XPC／物理打鍵の確認へ進める状態。
+
+
+### 完成読み結合のMixed専用Release反映・実XPC検証（2026-09-25）
+
+利用者の「反映してテスト」の依頼に従い、前節の修正をMixed専用Releaseへ反映した。ログ・退避は `build/auto-mixed/complete-reading-install-20260925/`。前節で未実施とした専用パッケージビルド・更新・実XPC・1,000回試験について、以下を追加実施した。
+
+- Releaseビルド成功（`build.log`）。モデルを明示してIMEと同梱helperを同じ構成で生成。診断はOFF。通常版を対象とするビルド／インストーラーは使用していない。
+- 更新前はmacOS標準日本語が選択中。旧Mixedを `previous-azooKeyMixed.app` へ退避し、専用 `update --dry-run` の署名・識別子検証後に `update` を実行して成功（`update-dry-run.log`／`update.log`）。入力ソースの登録・有効状態や選択を変更していない。更新直後のcurrentとstatusは更新前と同一（`current-before.txt`／`current-after.txt`、`status-before.txt`／`status-after.txt`）。
+- 導入先のdeep strict署名検証成功。ビルド先・導入先のIME/helper/モデル/アイコンSHAが一致し、モデルとアイコンは更新前と同一（`hashes-before.json`／`hashes-after.json`）。GGUF・marisaの5資源も更新前と一致（`resource-hashes.json`）。IME SHAは `da6e8b17204fa6e03c337170536d76ae56e3bc6b7c72db9f804dbde050d536a1`、helper SHAは `bb2237076cbb7f5636ea3feacb3d158293da0ceb4e54e89b729dbfc9be1b33e7`。
+- **更新済み実Mach XPC試験11件成功、skipなし、26.129秒**（`installed.log`）。追加の完成読み試験は5.308秒で成功。左文脈取得不可／空／固定日本語の3条件でkaihatu/kaihatsuを逐次入力し、「開発」の先頭表示、全体raw範囲、Tab候補1位、候補採用後Backspaceによる「かいは」、再入力による「開発」、古いrevisionの拒否、確定・ack、一括入力とEscape原文確定を検証した。固定試験文を隔離sessionに送信し、実アプリ本文・確定文脈は収集していない。
+- 既存のapple、sample/meetingと日本語長音の混在、13階詳細候補、読み単位削除、長音、不成立ローマ字、句読点後の継続、括弧等の記号、確定重複排除も成功。1,000回の入力・確定・ack試験は26.129秒で成功。これは長時間RSSや打鍵のp95測定ではない。今回の追加試験・ビルド・更新に失敗はなかった。
+
+前節のHEADでも再現するCore既存4試験の失敗は未解決のまま別記しており、今回の実XPC成功で全テスト成功とは扱わない。実アプリでの物理打鍵、secure field、長時間利用・性能分布、SwiftLintは今回未実行。Mixed自動を選択して `kaihatu` とBackspaceの実打鍵を試せる状態。差分空白検査成功、未コミット。

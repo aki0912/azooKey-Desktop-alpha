@@ -124,8 +124,14 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                         nextEnglish.append(EnglishRegion(range: span.sourceRange, raw: try source.slice(span.sourceRange)))
                     }
                 } else if let whole = japaneseSpan(range, source: source, scores: scores) {
-                    // Preserve already accepted kanji/reading boundaries such as asitano + te.
-                    // Dictionary candidates above still require English evidence and valid flanks.
+                    // A language-confidence boundary need not be a conversion boundary.
+                    // Rejoin a completed, independently supported tail (kaiha + tu),
+                    // while retaining weak reading previews and all English boundaries.
+                    if try canRejoinKanaTail(inherited, whole: whole, source: source, scores: scores) {
+                        result.append(whole)
+                        start = end
+                        continue
+                    }
                     let anchors = inherited.filter { $0.kind == .japaneseRoman || $0.kind == .japaneseKana }
                     var pieces: [MixedSpan] = []
                     var cursor = start
@@ -175,6 +181,23 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         previousEnglish = nextEnglish
         previousRaw = raw.isEmpty ? nil : raw
         return result
+    }
+
+    private func canRejoinKanaTail(_ spans: [MixedSpan], whole: MixedSpan,
+                                   source: TextOffsetMap, scores: [Double]) throws -> Bool {
+        guard whole.kind == .japaneseRoman, spans.count == 2,
+              spans[0].kind == .japaneseRoman, spans[1].kind == .japaneseKana,
+              spans[0].sourceRange.lowerBound == whole.sourceRange.lowerBound,
+              spans[0].sourceRange.upperBound == spans[1].sourceRange.lowerBound,
+              spans[1].sourceRange.upperBound == whole.sourceRange.upperBound else { return false }
+        let floor = max(model.holdJapaneseThreshold, model.contextualThresholds?.minimumJapanese ?? 0)
+        let tail = spans[1].sourceRange
+        guard scores[tail.lowerBound..<tail.upperBound].allSatisfy({ $0 >= floor }),
+              let joined = RomanSpanReading.parse(try source.slice(whole.sourceRange)), joined.suffix.isEmpty,
+              let prefix = RomanSpanReading.parse(try source.slice(spans[0].sourceRange)), prefix.suffix.isEmpty,
+              let suffix = RomanSpanReading.parse(try source.slice(tail)), suffix.suffix.isEmpty,
+              !prefix.reading.isEmpty, !suffix.reading.isEmpty else { return false }
+        return prefix.reading + suffix.reading == joined.reading
     }
 
     /// A grammar error must not erase a Japanese-preferred region. Preserve only

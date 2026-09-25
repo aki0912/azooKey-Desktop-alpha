@@ -118,6 +118,28 @@ import Testing
         #expect(try segmenter(fixture(0.45), policy: adjusted).segment("note").map(\.kind) == [.japaneseKana])
     }
 
+    @Test func completedKanaTailRejoinsOnlyWithEvidenceAtEveryPosition() throws {
+        // Artificial scores isolate display policy from language model accuracy.
+        for raw in ["kaihatu", "soketu"] {
+            let model = try fixture(0.995, characters: ["t": 0.9, "u": 0.9])
+            let baseline = try TrainedMixedSegmenter(model: model, focus: UUID()).segment(raw)
+            #expect(baseline.map(\.kind) == [.japaneseRoman, .japaneseKana])
+            let spans = try segmenter(model).segment(raw)
+            #expect(spans.map(\.kind) == [.japaneseRoman])
+            #expect(spans.first?.sourceRange == (try ScalarRange(0, raw.count)))
+        }
+        // The mean exceeds hold, but one tail position does not. Keep its preview.
+        let uncertain = try fixture(0.995, characters: ["t": 0.6, "u": 0.95])
+        #expect(try segmenter(uncertain).segment("kaihatu").map(\.kind)
+                == [.japaneseRoman, .japaneseKana])
+        for raw in ["kaiha tu", "kaiha_tu", "https://example.com/kaihatu"] {
+            let spans = try segmenter(uncertain).segment(raw)
+            try MixedMarkedTextRenderer.validate(spans: spans, source: TextOffsetMap(raw))
+            #expect(spans.count != 1 || spans.first?.kind != .japaneseRoman,
+                    "Must not join a separated or protected reading: \(raw)")
+        }
+    }
+
     @Test func englishHysteresisOnlyKeepsRelatedEditsAndClearsOnLifecycle() throws {
         // Hand-authored words/scores isolate hysteresis, not real English accuracy.
         let model = try fixture(0.48, characters: ["a": 0.99])
