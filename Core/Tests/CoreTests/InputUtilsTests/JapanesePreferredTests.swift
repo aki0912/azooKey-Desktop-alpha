@@ -534,7 +534,9 @@ import Testing
         #expect(engine.selectionOptions.contains { $0.text == "寿司" })
         try engine.handle(.escape)
         try engine.handle(.escape)
-        #expect(try engine.handle(.enter).commit?.text == "sushi")
+        #expect(engine.buffer.isEmpty)
+        let afterCancel = try engine.handle(.enter)
+        #expect(afterCancel.disposition == .fallthroughToApplication && afterCancel.commit == nil)
         #expect(bridge.activeChildCount == 0)
         #expect(preferred.retainedEnglishRegionCount == 0)
     }

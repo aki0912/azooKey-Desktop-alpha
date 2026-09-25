@@ -79,6 +79,31 @@ import XCTest
         }
     }
 
+    func testSecondEscapePreventsRecoveryOnFocusLossOrConnectionFailure() {
+        for losesFocus in [false, true] {
+            let server = Transport(), field = Field()
+            var rendered: [ConverterServerResponse] = []
+            let client = AutoMixedIMEClient(server: server, experimentEnabled: { true }) { rendered.append($0) }
+            client.requestedPolicy = .automaticMixed
+            client.activate(client: field, canEnable: { true })
+            server.commands[0].1(.init(snapshot: .empty, autoMixedCapability: .init(serverEpoch: UUID())))
+            for event in [key("main👩‍💻"), key("\u{1b}", code: 53), key("\u{1b}", code: 53)] {
+                XCTAssertEqual(client.handle(event, client: field, inputStyle: .defaultRomanToKana, context: { .init() }), true)
+            }
+            let replies = server.commands.dropFirst().map(\.1)
+            if losesFocus {
+                XCTAssertTrue(client.finishImmediately(client: field, keepMode: false))
+            } else {
+                replies.last?(nil)
+            }
+            XCTAssertTrue(field.inserted.isEmpty)
+            XCTAssertTrue(rendered.last?.snapshot.isEmpty == true)
+            for reply in replies { reply(nil) }
+            XCTAssertTrue(field.inserted.isEmpty)
+            XCTAssertEqual(rendered.count, 1)
+        }
+    }
+
     func testConnectionFailureRecoversOnceEvenWhenTeardownAlsoFails() {
         let server = Transport(), field = Field()
         let client = AutoMixedIMEClient(server: server, experimentEnabled: { true }, render: { _ in })

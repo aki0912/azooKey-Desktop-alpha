@@ -128,6 +128,12 @@ import Testing
             }
             manager.clearCharacterType()
             #expect(!manager.isEmpty && manager.characterType == nil)
+            guard case .stopComposition = action(key("\u{1b}", code: 53), live: live).0 else {
+                Issue.record("The second Escape must remove the complete composition"); continue
+            }
+            manager.stopComposition()
+            #expect(manager.isEmpty)
+            manager.insertAtCursorPosition("main", inputStyle: .roman2kana)
             manager.previewCharacterType(.halfWidthRoman)
             let (space, callback) = action(key(" ", code: 49), type: manager.characterType, live: live)
             if live {

@@ -188,15 +188,10 @@ private struct MockSegmenter: LanguageSegmenter {
         #expect(try engine.handle(.enter).disposition == .fallthroughToApplication)
     }
 
-    @Test func escapeClosesCandidateThenKeepsRawPreviewUntilEdit() throws {
+    @Test func firstEscapeKeepsRawPreviewUntilEdit() throws {
         let converter = MockConverter()
         let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)
         try engine.handle(.insert("ashita"))
-        try engine.handle(.tab())
-        try engine.handle(.tab())
-        try engine.handle(.escape)
-        #expect(engine.state == .composing)
-        #expect(try engine.markedText().text == "明日")
         try engine.handle(.escape)
         #expect(engine.state == .rawPreview)
         #expect(try engine.markedText().text == "ashita")
@@ -208,6 +203,42 @@ private struct MockSegmenter: LanguageSegmenter {
         try engine.handle(.space)
         #expect(engine.state == .composing)
         #expect(try engine.markedText().text == "明日 ")
+    }
+
+    @Test func secondEscapeCancelsEveryPreviewWithoutCommitting() throws {
+        for setup: MixedInputEvent? in [nil, .tab(), .characterType(.katakana), .characterType(.halfWidthRoman)] {
+            let converter = MockConverter()
+            let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)
+            try engine.handle(.insert("ashita API👩‍💻"))
+            if let setup { try engine.handle(setup) }
+            let first = try engine.handle(.escape)
+            #expect(first.commit == nil && !engine.buffer.isEmpty)
+            #expect(engine.characterType == nil && engine.selectionOptions.isEmpty)
+            let finished = converter.finishedCount
+            let second = try engine.handle(.escape)
+            #expect(second.disposition == .consumed && second.commit == nil)
+            #expect(engine.state == .idle && engine.buffer.isEmpty && engine.spans.isEmpty)
+            #expect(try engine.markedText().text.isEmpty)
+            #expect(converter.finishedCount == finished + 1)
+            #expect(try engine.handle(.escape).disposition == .fallthroughToApplication)
+            try engine.handle(.insert("ashita"))
+            #expect(try engine.markedText().text == "明日")
+            try engine.handle(.escape)
+            #expect(try engine.markedText().text == "ashita")
+        }
+    }
+
+    @Test func editingAndCandidateKeysRestartTheEscapeSequence() throws {
+        for event: MixedInputEvent in [.insert("a"), .space, .backspace, .tab(), .characterType(.halfWidthRoman)] {
+            let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: MockConverter())
+            try engine.handle(.insert("ashita"))
+            try engine.handle(.escape)
+            try engine.handle(event)
+            try engine.handle(.escape)
+            #expect(!engine.buffer.isEmpty)
+            try engine.handle(.escape)
+            #expect(engine.buffer.isEmpty)
+        }
     }
 
     @Test func editWhileSelectingDiscardsTheCandidateGeneration() throws {

@@ -702,6 +702,16 @@ extension MixedIMEInstalledTests {
             } else {
                 #expect(committed.effects == [.insertText("mainsh")])
             }
+            _ = try await key("main")
+            _ = try await key("x", flags: .option)
+            let firstEscape = try await key("\u{1b}", code: 53)
+            #expect(!firstEscape.snapshot.isEmpty)
+            let secondEscape = try await key("\u{1b}", code: 53)
+            #expect(secondEscape.inputState == .none && secondEscape.snapshot.isEmpty)
+            #expect(secondEscape.snapshot.markedText.elements.isEmpty)
+            #expect(secondEscape.effects.isEmpty)
+            // The previous automatic commit stays pending until acknowledged; Escape adds none.
+            #expect(secondEscape.autoMixed?.commits == committed.autoMixed?.commits)
             try await probe.close(session)
         }
     }

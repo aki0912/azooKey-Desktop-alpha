@@ -310,6 +310,39 @@ extension AutoMixedTransportTests {
 }
 
 extension AutoMixedTransportTests {
+    @Test func pendingSecondEscapeCannotRecoverCanceledText() throws {
+        for acknowledgeFirstEscape in [false, true] {
+            let epoch = UUID()
+            var ledger = AutoMixedClientLedger()
+            ledger.activate(capability: .init(serverEpoch: epoch))
+            let host = session(epoch: epoch)
+            let events = [key("main👩‍💻"), key("x", flags: .option), key("\u{1b}", code: 53), key("\u{1b}", code: 53)]
+            var replies: [AutoMixedResponse] = []
+            for (index, event) in events.enumerated() {
+                let operation = UInt64(index + 1)
+                ledger.recordKey(event, operationID: operation)
+                let response = try host.handle(.init(serverEpoch: epoch, focusID: ledger.focusID,
+                    operationID: operation, startsFocus: operation == 1, action: .key(event)))
+                let mixed = try #require(response.autoMixed)
+                replies.append(mixed)
+                if operation <= 2 || (operation == 3 && acknowledgeFirstEscape) {
+                    let accepted = ledger.acceptSnapshot(mixed)
+                    #expect(accepted)
+                }
+                #expect(mixed.commits.isEmpty && response.effects.isEmpty)
+            }
+            #expect(ledger.recoveryRaw().isEmpty)
+            #expect(ledger.immediateCommitText(displayed: "マイn👩‍💻").isEmpty)
+            #expect(replies[2].raw == "main👩‍💻")
+            #expect(replies[3].raw.isEmpty)
+            let acceptedLatest = ledger.acceptSnapshot(replies[3])
+            let acceptedStale = ledger.acceptSnapshot(replies[2])
+            #expect(acceptedLatest && !acceptedStale)
+            ledger.recordKey(key("new"), operationID: 5)
+            #expect(ledger.recoveryRaw() == "new")
+        }
+    }
+
     @Test func pendingDeletionOfWholePreviewDoesNotLockNextComposition() throws {
         let epoch = UUID()
         var ledger = AutoMixedClientLedger()

@@ -87,6 +87,7 @@ public struct AutoMixedClientLedger {
     private var appliedCommits = Set<UUID>()
     private var acknowledgedRaw = ""
     private var acknowledgedCharacterType: CompositionCharacterType?
+    private var acknowledgedEscape = false
     private var pendingKeys: [(UInt64, KeyEventCore)] = []
     public init() {}
     public mutating func activate(capability: AutoMixedCapability?) {
@@ -96,6 +97,7 @@ public struct AutoMixedClientLedger {
         appliedCommits = []
         acknowledgedRaw = ""
         acknowledgedCharacterType = nil
+        acknowledgedEscape = false
         pendingKeys = []
     }
     public mutating func deactivate() { activate(capability: nil) }
@@ -107,9 +109,14 @@ public struct AutoMixedClientLedger {
             return false
         }
         lastSnapshotOperation = response.operationID
-        acknowledgedCharacterType = replayKeys(pendingKeys.filter { $0.0 <= response.operationID }, resetOnEnter: true).type
+        let replay = replayKeys(pendingKeys.filter { $0.0 <= response.operationID }, resetOnEnter: true)
+        acknowledgedCharacterType = replay.type
+        acknowledgedEscape = replay.clearsOnNextEscape
         acknowledgedRaw = response.raw
-        if acknowledgedRaw.isEmpty { acknowledgedCharacterType = nil }
+        if acknowledgedRaw.isEmpty {
+            acknowledgedCharacterType = nil
+            acknowledgedEscape = false
+        }
         pendingKeys.removeAll { $0.0 <= response.operationID }
         return true
     }
@@ -128,26 +135,44 @@ public struct AutoMixedClientLedger {
         let recovered = replayKeys(pendingKeys)
         return recovered.type?.text(raw: recovered.raw) ?? recovered.raw
     }
-    private func replayKeys(_ keys: [(UInt64, KeyEventCore)], resetOnEnter: Bool = false)
-        -> (raw: String, type: CompositionCharacterType?) {
-        var buffer = RawCompositionBuffer(acknowledgedRaw)
-        var type = acknowledgedCharacterType
-        for (_, key) in keys {
-            switch AutoMixedKeyRouter.input(key) {
+    private struct ReplayedInput {
+        var buffer: RawCompositionBuffer
+        var type: CompositionCharacterType?
+        var clearsOnNextEscape: Bool
+        var raw: String { buffer.text }
+
+        mutating func apply(_ input: MixedInputEvent?, resetOnEnter: Bool) {
+            switch input {
             case .insert(let text): try? buffer.insert(text)
             case .space: try? buffer.insert(" ")
             case .backspace: _ = try? buffer.deleteBackward()
             case .characterType(let requested): type = requested
-            case .escape, .tab: type = nil
+            case .escape:
+                if clearsOnNextEscape { buffer = RawCompositionBuffer() }
+                clearsOnNextEscape = !buffer.isEmpty
+                type = nil
+            case .tab: type = nil
             case .enter where resetOnEnter && type != nil:
                 // A preview's Enter always commits; candidate adoption has no active type.
                 buffer = RawCompositionBuffer()
                 type = nil
             default: break
             }
-            if buffer.isEmpty { type = nil }
         }
-        return (buffer.text, type)
+    }
+    private func replayKeys(_ keys: [(UInt64, KeyEventCore)], resetOnEnter: Bool = false) -> ReplayedInput {
+        var replay = ReplayedInput(buffer: RawCompositionBuffer(acknowledgedRaw),
+                                   type: acknowledgedCharacterType, clearsOnNextEscape: acknowledgedEscape)
+        for (_, key) in keys {
+            let input = AutoMixedKeyRouter.input(key)
+            if case .escape? = input {} else if input != nil { replay.clearsOnNextEscape = false }
+            replay.apply(input, resetOnEnter: resetOnEnter)
+            if replay.buffer.isEmpty {
+                replay.type = nil
+                replay.clearsOnNextEscape = false
+            }
+        }
+        return replay
     }
     public mutating func takeCommits(_ response: AutoMixedResponse) -> [AutoMixedCommitEffect] {
         guard accepts(response) else {

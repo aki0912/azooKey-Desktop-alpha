@@ -23,6 +23,7 @@ import Foundation
     private var accepted: [UUID: MixedCandidate] = [:]
     private var selectingSpanID: UUID?
     private var selectionFromRawPreview = false
+    private var clearsOnNextEscape = false
 
     public init(segmenter: any LanguageSegmenter, converter: any JapaneseSpanConverting,
                 punctuation: MixedPunctuationPolicy? = nil,
@@ -35,6 +36,7 @@ import Foundation
 
     /// Whole raw-field edits for the isolated playground; no IMK cursor mapping is implied.
     public func replaceRaw(_ raw: String) throws {
+        clearsOnNextEscape = false
         revision &+= 1
         try edit {
             $0 = RawCompositionBuffer()
@@ -48,6 +50,7 @@ import Foundation
     }
 
     private func clearComposition() {
+        clearsOnNextEscape = false
         characterType = nil
         characterTypeSpanID = UUID()
         readingPreview = nil
@@ -87,6 +90,7 @@ import Foundation
             return MixedEventResult(disposition: .fallthroughToApplication, commit: nil)
         }
         revision &+= 1
+        if case .escape = event {} else { clearsOnNextEscape = false }
         switch event {
         case .characterType(let type):
             characterType = type
@@ -136,18 +140,21 @@ import Foundation
     }
 
     private func escape() throws {
+        if clearsOnNextEscape {
+            clearComposition()
+            return
+        }
         if characterType != nil {
             characterType = nil
             try edit { _ in }
-            return
-        }
-        if state == .selecting {
+        } else if state == .selecting {
             state = selectionFromRawPreview ? .rawPreview : .composing
             closeSelection()
         } else {
             readingPreview = nil
             state = .rawPreview
         }
+        clearsOnNextEscape = true
     }
 
     private func enter() throws -> MixedEventResult {
@@ -176,6 +183,7 @@ import Foundation
             return false
         }
         revision &+= 1
+        clearsOnNextEscape = false
         selectionIndex = index
         if adopt { try adoptCandidate() }
         return true

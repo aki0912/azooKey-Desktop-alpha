@@ -53,6 +53,9 @@ private struct RichCandidateSegmenter: LanguageSegmenter {
         try engine.handle(.escape)
         #expect(try engine.markedText().text == "👩‍💻13階")
         try engine.handle(.escape)
+        #expect(engine.buffer.isEmpty)
+        try engine.replaceRaw("👩‍💻13kai")
+        try engine.handle(.escape)
         try engine.handle(.tab())
         #expect(converter.enumerations == 2) // Raw preview must never invoke Zenzai.
         #expect(try engine.markedText().text == "👩‍💻13kai")
