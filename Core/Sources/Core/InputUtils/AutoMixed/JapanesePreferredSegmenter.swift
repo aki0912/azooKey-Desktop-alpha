@@ -14,6 +14,18 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         let unchangedPrefixCount: Int
         var suffixEvidence: [String: Bool] = [:]
     }
+    private struct ReadingBoundaryCheck {
+        let raw: String
+        let offset: Int
+        lazy var positions = RomanSpanReading.independentInputBoundaries(raw)
+
+        mutating func cutsInputUnit(_ range: ScalarRange) -> Bool {
+            guard let positions else {
+                return false
+            }
+            return !positions.contains(range.lowerBound - offset) || !positions.contains(range.upperBound - offset)
+        }
+    }
     private let baseline: TrainedMixedSegmenter
     private let model: LogisticLanguageModel
     private let context: CommittedLeftContext
@@ -367,8 +379,7 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         func mean(_ lower: Int, _ upper: Int) -> Double {
             (totals[upper - block.lowerBound] - totals[lower - block.lowerBound]) / Double(upper - lower)
         }
-        var checkedReadingBoundaries = false
-        var readingBoundaries: Set<Int>?
+        var reading = ReadingBoundaryCheck(raw: blockRaw, offset: block.lowerBound)
         // Longest match first, earliest start breaks ties; independent of typing history.
         for length in stride(from: maximum, through: policy.minimumPrefixLength, by: -1) {
             for lower in block.lowerBound...(block.upperBound - length) {
@@ -382,30 +393,29 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                 guard lexicon.exactLevel(word) != nil,
                       isEnglish(word, range: range, scores: scores, atEnd: false,
                                 unchangedPrefixCount: search.unchangedPrefixCount) else { continue }
-                if context.isAvailable {
-                    if !checkedReadingBoundaries {
-                        readingBoundaries = RomanSpanReading.independentInputBoundaries(blockRaw)
-                        checkedReadingBoundaries = true
-                    }
-                    // Context alone must not turn hennkou into hen + nkou by
-                    // bisecting nn. Genuine English such as meeting can also cross
-                    // roman units, so require its existing gate on context-free scores.
-                    if let readingBoundaries,
-                       !readingBoundaries.contains(lower - block.lowerBound)
-                        || !readingBoundaries.contains(upper - block.lowerBound) {
-                        if scoresWithoutContext == nil {
-                            scoresWithoutContext = try independentScores(for: search)
-                        }
-                        guard isEnglish(word, range: range, scores: scoresWithoutContext!, atEnd: false,
-                                        unchangedPrefixCount: search.unchangedPrefixCount) else { continue }
-                    }
-                }
+                guard try permitsEmbeddedEnglish(word, range: range, search: search, reading: &reading,
+                                                 scoresWithoutContext: &scoresWithoutContext) else { continue }
                 if let pieces = try japaneseFlanks(around: range, in: block, search: &search, mean: mean) {
                     return pieces
                 }
             }
         }
         return nil
+    }
+
+    private func permitsEmbeddedEnglish(_ word: String, range: ScalarRange, search: EnglishSearch,
+                                        reading: inout ReadingBoundaryCheck, scoresWithoutContext: inout [Double]?) throws -> Bool {
+        guard context.isAvailable, reading.cutsInputUnit(range) else {
+            return true
+        }
+        // Context alone must not turn hennkou into hen + nkou by bisecting nn.
+        // Genuine English such as meeting can also cross roman units, so require
+        // its existing gate on context-free scores, shared within this edit.
+        if scoresWithoutContext == nil {
+            scoresWithoutContext = try independentScores(for: search)
+        }
+        return isEnglish(word, range: range, scores: scoresWithoutContext!, atEnd: false,
+                         unchangedPrefixCount: search.unchangedPrefixCount)
     }
 
     private func japaneseFlanks(around range: ScalarRange, in block: ScalarRange,
