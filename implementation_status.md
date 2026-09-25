@@ -1766,3 +1766,21 @@ Macのロックという前回の制約は解消したが、今回は自動キ�
 macOS 27 arm64／Xcode 27／Swift 6.4で実行。SwiftPM native非推奨・依存deployment target等の既存警告は残る。SwiftLintは未導入で未実行。試用アプリはビルドしたが、追加ボタンのGUI操作は未実行。実アプリでの物理打鍵、secure field、長時間利用・RSS、新規削除処理の性能測定も未実行。先行のTextEdit対照試験で自動文字キー送信を通常IME入力と同等に扱えなかったため、実XPCの成功で物理打鍵成功とはしない。
 
 実装・通常辞書・実Zenzai・実XPCの検証とMixed更新は完了。次はMixed自動での物理打鍵による「asita → Backspace → Backspace」、促音・撥音を残す削除と再入力の確認。差分は未コミットで、先行の句読点継続修正を保持している。
+
+
+## 丸括弧の日本語全角表示（2026-09-25）
+
+開始HEADは `2f0687c`（`Add Japanese reading backspace previews and refine dotted-token handling`）、作業開始時のworking treeはclean。Mixedの既存記号表示規則へ `(` → `（`、`)` → `）` を追加。英語直後・URL・数値に接する記号の保護は既存規則を維持する。閉じ丸括弧は開き丸括弧の幅を優先し、`asita(apple)` は「明日（apple）」、`apple(asita)` は「apple(明日)」。角括弧とは別に開き括弧を保持するため入れ子を扱え、取得できる確定左文脈にある開き括弧にも対応する。本文・確定文脈は記録しない。
+
+原文raw、Unicode scalar範囲、モデル・辞書・閾値・XPC schema、通常版/manualは変更なし。Escapeは元のASCII括弧を表示・確定する。操作ガイド `Tools/AUTO_MIXED_IME.md` も更新した。
+
+ログは `build/auto-mixed/parentheses-20260925/`。通常辞書・実Zenzaiを含む関連Core試験 **17件・3 suite成功、skipなし、17.194秒**（`core.log`）。日本語・英語・空白後、括弧の入れ子、確定左文脈、URL・数値・既存全角の保護、結合文字、Unicode範囲、削除・再入力、Tab・Escape・確定を確認。句読点後の継続入力と読み単位Backspaceの既存回帰も成功。実Zenzaiはbackend readyを要求し、学習OFF。既存期待値を弱めず、括弧の新仕様に対応するケースを追加した。
+
+
+Mixed専用Releaseのビルド・署名検証、専用updateのdry-runと更新が成功（`build.log`／`update-dry-run.log`／`update.log`）。更新済み実Mach XPCの記号試験は **1件成功、skipなし、0.827秒**（`installed.log`）。固定例を1文字ずつ送信して、新規の日本語／英語丸括弧、確定左文脈からの閉じ括弧、数値・URL保護と、既存記号の表示・確定・ackを検証した。
+
+ビルド先と導入先のapp/helper/モデル/3アイコンSHA一致、deep strict署名検証成功。app SHAは `253ab10e72b5763f44e1401601951f95191a3a6c1bdc780a15caae54d1d3e73b`、helper SHAは `2face317d551d98a8470815320fc52d788fe534c6c0e511bd7e0e806dfc06a17`。モデル・アイコンは更新前と同一、Release、診断OFF。旧Mixedの復旧用コピーを同じログディレクトリに保持。通常版・登録・有効状態は変更していない。
+
+更新前後のMixedモード状態JSONは一致した。選択中ソースは開始時がmacOS標準日本語、終了時がABCで、一致を要求した確認スクリプトのassertionは失敗した。今回のツール操作に入力ソースの選択命令はなく、専用updateも選択中Mixedを検出すると停止する方式。切替の原因は未確認であり、前後の選択ソースまで同一だったとは報告しない。選択を強制的に戻す操作は行っていない。hash・構成・診断・Mixedモード状態の検証はそれぞれ成功。
+
+macOS 27 arm64／Xcode 27／Swift 6.4。既存のSwiftPM native非推奨・依存deployment target警告あり。物理打鍵・実アプリ欄の確認、性能計測、SwiftLintは未実行。実XPCの成功とは区別する。コード・回帰試験・Mixed反映は完了、差分は未コミット。

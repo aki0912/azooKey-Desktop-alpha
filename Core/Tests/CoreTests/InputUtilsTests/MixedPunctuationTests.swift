@@ -67,7 +67,13 @@ private struct PunctuationSegmenter: LanguageSegmenter {
     @Test func pairedBracketsFollowTheirOpeningIncludingCommittedContext() throws {
         for (raw, expected) in [("[apple]", "「apple」"), ("apple[asita]", "apple[明日]"),
                                 ("[[apple]]", "「「apple」」"), ("asita[apple]", "明日「apple」"),
-                                ("apple]", "apple]"), ("[3]", "[3]")] {
+                                ("apple]", "apple]"), ("[3]", "[3]"),
+                                ("()", "（）"), ("asita()", "明日（）"),
+                                ("(apple)", "（apple）"), ("apple(asita)", "apple(明日)"),
+                                ("((apple))", "（（apple））"), ("([apple])", "（「apple」）"),
+                                ("asita(apple)", "明日（apple）"), ("apple()", "apple()"),
+                                ("apple ()", "apple （）"), ("apple)", "apple)"), ("asita)", "明日）"),
+                                ("(3)", "(3)"), ("(apple3)", "（apple3）")] {
             let engine = engine()
             try engine.replaceRaw(raw)
             #expect(try engine.markedText().text == expected, "authored: \(raw)")
@@ -76,7 +82,10 @@ private struct PunctuationSegmenter: LanguageSegmenter {
                                          ("明日", "?!", "？！"), ("apple", "?!", "?!"),
                                          ("明日？", "!", "！"), ("apple ", "?", "？"),
                                          ("apple ", ".", "。"), ("「apple", "]", "」"),
-                                         ("apple[明日", "]", "]"), ("", ",", "、")] {
+                                         ("apple[明日", "]", "]"), ("", ",", "、"),
+                                         ("明日", "()", "（）"), ("apple", "()", "()"),
+                                         ("（apple", ")", "）"), ("apple(明日", ")", ")"),
+                                         ("（「apple", "])", "」）"), ("（apple）", ")", "）")] {
             let engine = engine(context: .available(context))
             try engine.replaceRaw(raw)
             #expect(try engine.markedText().text == expected)
@@ -88,7 +97,7 @@ private struct PunctuationSegmenter: LanguageSegmenter {
         for raw in ["https://example.com/a-b[x]", "www.example.com", "name@example.com", "main.swift", "src/a-b.swift",
                     "https://example.com/?q=日本語!", "foo_bar?!", "5!", "?3", "3?",
                     "snake_case[0]", "foo::bar[1]", "1.", "-3.14", "1,234.5", "2026-09-24", "v3.2",
-                    "ー。、「」？！", ".\u{301}", "?\u{301}", "!\u{301}", "👩‍💻e\u{301}"] {
+                    "ー。、「」？！（）", "https://example.com/a(b)", "(\u{301}", ".\u{301}", "?\u{301}", "!\u{301}", "👩‍💻e\u{301}"] {
             try engine.replaceRaw(raw)
             #expect(try engine.markedText().text == raw, "protected: \(raw)")
         }
@@ -102,7 +111,7 @@ private struct PunctuationSegmenter: LanguageSegmenter {
 
     @Test func unicodeOffsetsEscapeDeletionAndCandidateDisplayRemainConsistent() throws {
         let engine = engine()
-        for (suffix, expected) in [("-.,[]", "ー。、「」"), ("?!", "？！")] {
+        for (suffix, expected) in [("-.,[]", "ー。、「」"), ("?!", "？！"), ("()", "（）")] {
             let raw = "👩‍💻e\u{301}" + suffix
             try engine.replaceRaw(raw)
             let marked = try engine.markedText()
@@ -119,7 +128,7 @@ private struct PunctuationSegmenter: LanguageSegmenter {
             #expect(try engine.markedText().text == raw)
             #expect(try engine.handle(.enter).commit?.text == raw)
         }
-        for (raw, expected) in [(".", "。"), ("?", "？"), ("!", "！")] {
+        for (raw, expected) in [(".", "。"), ("?", "？"), ("!", "！"), ("(", "（"), (")", "）")] {
             try engine.replaceRaw(raw)
             try engine.handle(.tab())
             #expect(engine.selectionOptions.map(\.text) == [expected])
@@ -190,7 +199,7 @@ private struct PunctuationSegmenter: LanguageSegmenter {
         for (raw, expected) in [("asita.", "明日。"), ("asita,", "明日、"), ("apple.", "apple."),
                                 ("asita?", "明日？"), ("asita!", "明日！"), ("asita?!", "明日？！"),
                                 ("apple?", "apple?"), ("apple!", "apple!"),
-                                ("[apple]", "「apple」"), ("asita-", "明日ー")] {
+                                ("[apple]", "「apple」"), ("asita-", "明日ー"), ("asita(apple)", "明日（apple）"), ("apple(asita)", "apple(明日)"), ("()", "（）")] {
             engine.cancel()
             for character in raw { try engine.handle(.insert(String(character))) }
             #expect(try engine.markedText().text == expected, "runtime: \(raw)")

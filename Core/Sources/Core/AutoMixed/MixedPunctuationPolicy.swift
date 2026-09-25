@@ -33,9 +33,12 @@ public struct MixedPunctuationPolicy: Sendable {
         var english = context.last.map(Self.isLetter) ?? false
         var previous = context.last
         var brackets: [Unicode.Scalar] = []
+        var parentheses: [Unicode.Scalar] = []
         for scalar in context {
             if scalar == "[" || scalar == "「" { brackets.append(scalar) }
             if scalar == "]" || scalar == "」", !brackets.isEmpty { brackets.removeLast() }
+            if scalar == "(" || scalar == "（" { parentheses.append(scalar) }
+            if scalar == ")" || scalar == "）", !parentheses.isEmpty { parentheses.removeLast() }
         }
         var result: [UUID: String] = [:]
         for span in spans {
@@ -52,6 +55,8 @@ public struct MixedPunctuationPolicy: Sendable {
                     let numeric = previous.map(Self.isDigit) == true || next.map(Self.isDigit) == true
                     if scalar == "]", let opening = brackets.last {
                         display = opening == "「" ? "」" : "]"
+                    } else if scalar == ")", let opening = parentheses.last {
+                        display = opening == "（" ? "）" : ")"
                     } else if !english && !numeric {
                         display = replacement
                     }
@@ -59,6 +64,8 @@ public struct MixedPunctuationPolicy: Sendable {
                 output.append(display)
                 if display == "[" || display == "「" { brackets.append(display) }
                 if display == "]" || display == "」", !brackets.isEmpty { brackets.removeLast() }
+                if display == "(" || display == "（" { parentheses.append(display) }
+                if display == ")" || display == "）", !parentheses.isEmpty { parentheses.removeLast() }
                 if Self.isLetter(scalar) {
                     english = span.kind == .raw
                 } else if !Self.isASCIIPunctuation(display) {
@@ -81,6 +88,8 @@ public struct MixedPunctuationPolicy: Sendable {
         case "!": return "！"
         case "[": return "「"
         case "]": return "」"
+        case "(": return "（"
+        case ")": return "）"
         default: return nil
         }
     }
