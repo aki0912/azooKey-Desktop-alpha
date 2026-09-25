@@ -65,6 +65,8 @@ import Glibc
 }
 
 private enum ValidationError: Error { case romanMismatch, outputRedirection }
+// Mirror the external Python fixture schema without renaming its fields.
+// swiftlint:disable identifier_name
 private struct Request: Decodable {
     let rows: [Row]
     struct Row: Decodable {
@@ -80,3 +82,4 @@ private struct Response: Encodable {
     let request_sha256: String
     let protections: [[String]]
 }
+// swiftlint:enable identifier_name

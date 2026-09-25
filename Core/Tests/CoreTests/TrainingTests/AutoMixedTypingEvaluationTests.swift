@@ -60,6 +60,8 @@ import Glibc
 }
 
 private enum TypingEvaluationError: Error { case redirection }
+// Mirror the external Python fixture schema without renaming its fields.
+// swiftlint:disable identifier_name
 private struct TypingRequest: Decodable {
     let rows: [Row]
     struct Row: Decodable { let raw: String; let left_context: String? }
@@ -68,3 +70,4 @@ private struct TypingSpan: Encodable { let start: Int; let end: Int; let kind: S
 private struct TypingFrame: Encodable { let end: Int; let milliseconds: Double; let spans: [TypingSpan] }
 private struct TypingResult: Encodable { let forward: [TypingFrame]; let backward: [TypingFrame]; let paste: [TypingFrame] }
 private struct TypingResponse: Encodable { let request_sha256: String; let model_sha256: String; let rows: [TypingResult] }
+// swiftlint:enable identifier_name

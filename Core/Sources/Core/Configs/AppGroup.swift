@@ -18,7 +18,9 @@ public enum AppGroup {
     /// `nil`を返す。その場合もクライアントと同じデータを使えるよう、macOSで定義された
     /// ユーザー単位のGroup Containers配下を明示的に解決する。
     public static func containerURL(homeDirectoryURL: URL) -> URL {
-        if IMEIdentity.current == .mixed { return IMEIdentity.mixed.mixedDataDirectory(home: homeDirectoryURL) }
+        if IMEIdentity.current == .mixed {
+            return IMEIdentity.mixed.mixedDataDirectory(home: homeDirectoryURL)
+        }
         return homeDirectoryURL
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("Group Containers", isDirectory: true)

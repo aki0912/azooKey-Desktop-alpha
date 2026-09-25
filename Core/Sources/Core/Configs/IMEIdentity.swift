@@ -21,8 +21,12 @@ public enum IMEIdentity: String, Sendable {
     public var automaticModeIdentifier: String { bundleIdentifier + ".Automatic" }
 
     public static func resolve(executableURL: URL?, bundleIdentifier: String?) -> Self {
-        if bundleIdentifier == Self.mixed.bundleIdentifier { return .mixed }
-        guard var directory = executableURL?.deletingLastPathComponent() else { return .standard }
+        if bundleIdentifier == Self.mixed.bundleIdentifier {
+            return .mixed
+        }
+        guard var directory = executableURL?.deletingLastPathComponent() else {
+            return .standard
+        }
         while directory.path != "/" {
             if directory.lastPathComponent == "Contents" {
                 let url = directory.appendingPathComponent("Info.plist")

@@ -1,6 +1,6 @@
 import Core
-import Testing
 import Foundation
+import Testing
 
 private struct ContinuitySegmenter: LanguageSegmenter {
     func segment(_ raw: String) throws -> [MixedSpan] {
@@ -9,7 +9,9 @@ private struct ContinuitySegmenter: LanguageSegmenter {
             return [try MixedSpan(sourceRange: ScalarRange(0, 3), kind: .japaneseRoman),
                     try MixedSpan(sourceRange: ScalarRange(3, count), kind: .raw)]
         }
-        if raw.hasSuffix("?") { return [try MixedSpan(sourceRange: ScalarRange(0, count), kind: .raw)] }
+        if raw.hasSuffix("?") {
+            return [try MixedSpan(sourceRange: ScalarRange(0, count), kind: .raw)]
+        }
         return [try MixedSpan(sourceRange: ScalarRange(0, count), kind: .japaneseRoman)]
     }
 }

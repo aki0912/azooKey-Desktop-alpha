@@ -59,7 +59,9 @@ private struct RichCandidateSegmenter: LanguageSegmenter {
         engine.cancel()
         try engine.replaceRaw("13kai")
         converter.fails = true
-        #expect(throws: AutoMixedError.self) { try engine.handle(.tab()) }
+        try engine.handle(.tab())
+        #expect(engine.usedRawFallback)
+        #expect(try engine.markedText().text == "13kai")
         #expect(engine.buffer.text == "13kai")
         #expect(engine.state == .composing)
         #expect(engine.selectionOptions.isEmpty)

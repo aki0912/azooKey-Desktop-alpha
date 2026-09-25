@@ -41,7 +41,9 @@ public struct ContextualCharacterFeatures: Sendable, CustomDebugStringConvertibl
     }
 
     private static func makeContextKeys(_ context: CommittedLeftContext) -> [String] {
-        guard let text = context.text else { return ["[\"ctx\",\"availability\",\"unavailable\"]"] }
+        guard let text = context.text else {
+            return ["[\"ctx\",\"availability\",\"unavailable\"]"]
+        }
         let scalars = Array(text.unicodeScalars)
         var keys = ["[\"ctx\",\"availability\",\"available\"]"]
         for distance in 1...CommittedLeftContext.scalarLimit {

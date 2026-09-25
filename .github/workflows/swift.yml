@@ -4,6 +4,23 @@ on:
   pull_request:
 
 jobs:
+  auto-mixed-python:
+    name: Test Mixed IME tooling and training
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: Tools/AutoMixedTraining/requirements.lock
+      - name: Install pinned training dependencies
+        run: python -m pip install -r Tools/AutoMixedTraining/requirements.lock
+      - name: Test build and installer contracts
+        run: python -m unittest discover -s Tools/tests -p 'test_*.py'
+      - name: Test training and evaluation contracts
+        run: python -m unittest discover -s Tools/AutoMixedTraining -p 'test_*.py'
+
   macos-build:
     name: Build and Test on macOS
     runs-on: macos-15

@@ -99,8 +99,12 @@ public enum JapaneseSpanBridgeError: Error { case invalidToken, missingZenzaiWei
     public private(set) var sessionReleasedCount = 0
     public var activeChildCount: Int { children.count }
     public var backend: MixedConversionBackend {
-        guard let expectedModelStatus else { return .dictionary }
-        if converter.zenzStatus.isEmpty { return .zenzaiPending }
+        guard let expectedModelStatus else {
+            return .dictionary
+        }
+        if converter.zenzStatus.isEmpty {
+            return .zenzaiPending
+        }
         return converter.zenzStatus == expectedModelStatus ? .zenzaiReady : .zenzaiUnavailable
     }
     public static let maximumChildren = 32
@@ -130,58 +134,28 @@ public enum JapaneseSpanBridgeError: Error { case invalidToken, missingZenzaiWei
                                       convertedRange: try ScalarRange(request.sourceRange.lowerBound, request.sourceRange.lowerBound),
                                       suffixRange: request.sourceRange, candidates: [], fallback: reason)
         }
-        guard let parsed = RomanSpanReading.parse(request.raw) else { return try fallback(.invalidRoman) }
-        guard parsed.suffix.isEmpty || request.isAtBufferEnd else { return try fallback(.incompleteInternalSpan) }
-        guard !parsed.prefix.isEmpty else { return try fallback(.noCompletePrefix) }
-        let settingsChanged = children[key]?.request.map { $0.settingsVersion != request.settingsVersion } ?? false
-        if let previous = children[key]?.request {
-            let suffixEdit = previous.raw.unicodeScalars.starts(with: request.raw.unicodeScalars)
-                || request.raw.unicodeScalars.starts(with: previous.raw.unicodeScalars)
-            if !suffixEdit || previous.sourceRange.lowerBound != request.sourceRange.lowerBound
-                || previous.leftContext != request.leftContext || previous.rightContext != request.rightContext
-                || previous.settingsVersion != request.settingsVersion || previous.rich != request.rich {
-                release(key)
-            }
+        guard let parsed = RomanSpanReading.parse(request.raw) else {
+            return try fallback(.invalidRoman)
         }
+        guard parsed.suffix.isEmpty || request.isAtBufferEnd else {
+            return try fallback(.incompleteInternalSpan)
+        }
+        guard !parsed.prefix.isEmpty else {
+            return try fallback(.noCompletePrefix)
+        }
+        let settingsChanged = children[key]?.request.map { $0.settingsVersion != request.settingsVersion } ?? false
         let cacheKey = PreviewKey(conversionInput: parsed.conversionInput, completesTerminalN: parsed.completesTerminalN,
                                   left: request.leftContext, right: request.rightContext,
                                   rich: request.rich, settings: request.settingsVersion)
-        // Zenzai's session cache also carries a previous-candidate prefix constraint.
-        // It is not a pure calculation cache: across readings it can change ranking
-        // (observed in the installed shared server with an empty left context).
-        // The pinned public API cannot clear that constraint independently. Keep
-        // exact-reading reuse, and the converter-wide pure memoization cache, but
-        // start fresh for changed Zenzai readings to preserve the existing display.
-        // Dictionary-only lattice sessions can still reuse suffix edits.
-        if expectedModelStatus != nil, let previous = children[key]?.cacheKey, previous != cacheKey {
-            release(key)
+        invalidateChild(key, for: request, cacheKey: cacheKey)
+        guard var child = child(for: key) else {
+            return try fallback(.sessionLimit)
         }
-        if children[key] == nil {
-            guard children.count < Self.maximumChildren else {
-                sessionLimitHitCount += 1
-                return try fallback(.sessionLimit)
-            }
-            sessionCreatedCount += 1
-            MixedPerformance.count(.sessionCreated)
-            children[key] = Child(session: converter.createSession(), manager: SegmentsManager(
-                kanaKanjiConverter: converter, applicationDirectoryURL: directory, containerURL: container, context: context
-            ))
-        }
-        guard var child = children[key] else { return try fallback(.sessionLimit) }
         if child.cacheKey != cacheKey {
-            let actual = try MixedPerformance.measure(.conversion) {
-                try converter.withSession(child.session) {
-                    if settingsChanged {
-                        child.manager.activate()
-                        child.manager.reloadUserDictionary()
-                    }
-                    return child.manager.replaceCompositionFromRaw(parsed.conversionInput, leftContext: request.leftContext,
-                        rightContext: request.rightContext, rich: request.rich, completeRomanInput: parsed.completesTerminalN)
-                }
+            let actual = try requestCandidates(request, parsed: parsed, child: child, settingsChanged: settingsChanged)
+            if expectedModelStatus != nil, backend != .zenzaiReady {
+                return try fallback(.modelUnavailable)
             }
-            MixedPerformance.count(.candidates)
-            candidateRequestCount += 1
-            if expectedModelStatus != nil, backend != .zenzaiReady { return try fallback(.modelUnavailable) }
             child.actual = actual
             child.cacheKey = cacheKey
             // Invalidate presentation even if a caller reused its revision.
@@ -200,12 +174,70 @@ public enum JapaneseSpanBridgeError: Error { case invalidToken, missingZenzaiWei
             child.request = request
             children[key] = child
         }
-        guard !child.candidates.isEmpty else { return try fallback(.noFullCandidate) }
+        guard !child.candidates.isEmpty else {
+            return try fallback(.noFullCandidate)
+        }
         let end = request.sourceRange.lowerBound + parsed.prefix.unicodeScalars.count
         return JapaneseSpanResult(identity: request.identity,
                                   convertedRange: try ScalarRange(request.sourceRange.lowerBound, end),
                                   suffixRange: try ScalarRange(end, request.sourceRange.upperBound),
                                   candidates: child.candidates, fallback: nil)
+    }
+
+    private func invalidateChild(_ key: Key, for request: JapaneseSpanRequest, cacheKey: PreviewKey) {
+        if let previous = children[key]?.request {
+            let suffixEdit = previous.raw.unicodeScalars.starts(with: request.raw.unicodeScalars)
+                || request.raw.unicodeScalars.starts(with: previous.raw.unicodeScalars)
+            if !suffixEdit || previous.sourceRange.lowerBound != request.sourceRange.lowerBound
+                || previous.leftContext != request.leftContext || previous.rightContext != request.rightContext
+                || previous.settingsVersion != request.settingsVersion || previous.rich != request.rich {
+                release(key)
+            }
+        }
+        // Zenzai's session cache also carries a previous-candidate prefix constraint.
+        // It is not a pure calculation cache: across readings it can change ranking
+        // (observed in the installed shared server with an empty left context).
+        // The pinned public API cannot clear that constraint independently. Keep
+        // exact-reading reuse, and the converter-wide pure memoization cache, but
+        // start fresh for changed Zenzai readings to preserve the existing display.
+        // Dictionary-only lattice sessions can still reuse suffix edits.
+        if expectedModelStatus != nil, let previous = children[key]?.cacheKey, previous != cacheKey {
+            release(key)
+        }
+    }
+
+    private func child(for key: Key) -> Child? {
+        if let child = children[key] {
+            return child
+        }
+        guard children.count < Self.maximumChildren else {
+            sessionLimitHitCount += 1
+            return nil
+        }
+        sessionCreatedCount += 1
+        MixedPerformance.count(.sessionCreated)
+        let child = Child(session: converter.createSession(), manager: SegmentsManager(
+            kanaKanjiConverter: converter, applicationDirectoryURL: directory, containerURL: container, context: context
+        ))
+        children[key] = child
+        return child
+    }
+
+    private func requestCandidates(_ request: JapaneseSpanRequest, parsed: RomanSpanReading,
+                                   child: Child, settingsChanged: Bool) throws -> [Candidate] {
+        let actual = try MixedPerformance.measure(.conversion) {
+            try converter.withSession(child.session) {
+                if settingsChanged {
+                    child.manager.activate()
+                    child.manager.reloadUserDictionary()
+                }
+                return child.manager.replaceCompositionFromRaw(parsed.conversionInput, leftContext: request.leftContext,
+                    rightContext: request.rightContext, rich: request.rich, completeRomanInput: parsed.completesTerminalN)
+            }
+        }
+        MixedPerformance.count(.candidates)
+        candidateRequestCount += 1
+        return actual
     }
 
     /// T5 must call this only after the host has applied a commit, while its tokens are retained.
@@ -236,7 +268,9 @@ public enum JapaneseSpanBridgeError: Error { case invalidToken, missingZenzaiWei
     }
 
     private func release(_ key: Key) {
-        guard let child = children.removeValue(forKey: key) else { return }
+        guard let child = children.removeValue(forKey: key) else {
+            return
+        }
         // stopComposition would also end the shared Zenzai session. Removing this child suffices.
         converter.removeSession(child.session)
         sessionReleasedCount += 1

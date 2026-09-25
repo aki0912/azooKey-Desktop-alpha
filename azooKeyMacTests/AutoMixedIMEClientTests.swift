@@ -10,10 +10,18 @@ import XCTest
     final class Transport: AutoMixedCommandSending {
         var commands: [(ConverterSessionCommand, (ConverterServerResponse?) -> Void)] = []
         var timeouts: [TimeInterval?] = []
+        var failRetirementSynchronously = false
+        var retirements = 0
         func send(_ command: @escaping (String) -> ConverterSessionCommand, timeout: TimeInterval?,
                   completion: @escaping (ConverterServerResponse?) -> Void) {
-            commands.append((command("test"), completion))
+            let resolved = command("test")
+            commands.append((resolved, completion))
             timeouts.append(timeout)
+            if case .autoMixed(let request) = resolved, case .deactivate = request.action {
+                retirements += 1
+                // Bound the test double so a regression reports recursion instead of crashing.
+                if failRetirementSynchronously && retirements == 1 { completion(nil) }
+            }
         }
     }
     final class Field: NSObject, IMKTextInput {
@@ -40,6 +48,51 @@ import XCTest
     }
     func key(_ text: String, code: UInt16 = 0) -> KeyEventCore {
         .init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: code)
+    }
+
+    func testRetirementFailureCannotRecursivelyRecoverOrOverwriteNextComposition() throws {
+        for keepMode in [false, true] {
+            let server = Transport(), field = Field()
+            var rendered: [ConverterServerResponse] = []
+            let client = AutoMixedIMEClient(server: server, experimentEnabled: { true }) { rendered.append($0) }
+            client.requestedPolicy = .automaticMixed
+            client.activate(client: field, canEnable: { true })
+            server.commands[0].1(.init(snapshot: .empty, autoMixedCapability: .init(serverEpoch: UUID())))
+            _ = client.handle(key("asitan"), client: field, inputStyle: .defaultRomanToKana, context: { .init() })
+            let pendingReply = server.commands[1].1
+            server.failRetirementSynchronously = true
+            XCTAssertTrue(client.finishImmediately(client: field, keepMode: keepMode))
+            XCTAssertEqual(server.retirements, 1)
+            XCTAssertEqual(field.inserted, ["asitan"])
+            XCTAssertEqual(client.isActive, keepMode)
+            XCTAssertEqual(rendered.count, 1)
+            pendingReply(nil)
+            XCTAssertEqual(field.inserted, ["asitan"])
+            XCTAssertEqual(rendered.count, 1)
+            if keepMode {
+                _ = client.handle(key("next"), client: field, inputStyle: .defaultRomanToKana, context: { .init() })
+                guard case .autoMixed(let request) = server.commands.last?.0 else { return XCTFail("Missing next input") }
+                XCTAssertTrue(request.startsFocus)
+                XCTAssertTrue(client.finishImmediately(client: field, keepMode: false))
+                XCTAssertEqual(field.inserted, ["asitan", "next"])
+            }
+        }
+    }
+
+    func testConnectionFailureRecoversOnceEvenWhenTeardownAlsoFails() {
+        let server = Transport(), field = Field()
+        let client = AutoMixedIMEClient(server: server, experimentEnabled: { true }, render: { _ in })
+        client.requestedPolicy = .automaticMixed
+        client.activate(client: field, canEnable: { true })
+        server.commands[0].1(.init(snapshot: .empty, autoMixedCapability: .init(serverEpoch: UUID())))
+        _ = client.handle(key("asita"), client: field, inputStyle: .defaultRomanToKana, context: { .init() })
+        let reply = server.commands[1].1
+        server.failRetirementSynchronously = true
+        reply(nil)
+        reply(nil)
+        XCTAssertFalse(client.isActive)
+        XCTAssertEqual(server.retirements, 1)
+        XCTAssertEqual(field.inserted, ["asita"])
     }
 
     func testManualModeDoesNotNegotiateEvenWhenExperimentIsEnabled() {

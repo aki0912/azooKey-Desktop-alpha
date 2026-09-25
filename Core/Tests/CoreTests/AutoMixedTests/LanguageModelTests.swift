@@ -26,6 +26,8 @@ func syntheticModelData(_ change: (inout [String: Any]) -> Void = { _ in }) thro
     return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
 }
 
+// Mirror the external Python fixture schema without renaming its fields.
+// swiftlint:disable identifier_name
 struct ScoreVector: Decodable {
     let raw: String
     let index: Int
@@ -34,6 +36,7 @@ struct ScoreVector: Decodable {
     let logit: Double
     let p_ja: Double
 }
+// swiftlint:enable identifier_name
 
 func checkScore(_ vector: ScoreVector, model: LogisticLanguageModel) throws {
     let features = AnchoredCharacterFeatures(vector.raw)
@@ -100,7 +103,7 @@ func checkScore(_ vector: ScoreVector, model: LogisticLanguageModel) throws {
             #expect(throws: (any Error).self) { try LogisticLanguageModel(data: data) }
         }
         // JSONDecoder must also reject a numeric exponent that exceeds finite Double.
-        let base = try String(decoding: syntheticModelData(), as: UTF8.self)
+        let base = try #require(String(data: syntheticModelData(), encoding: .utf8))
         let overflowing = base.replacingOccurrences(of: "\"intercept\":-0.1875", with: "\"intercept\":1e999")
         #expect(overflowing != base)
         #expect(throws: (any Error).self) { try LogisticLanguageModel(data: Data(overflowing.utf8)) }

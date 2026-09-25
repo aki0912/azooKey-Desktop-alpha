@@ -41,6 +41,16 @@ private struct MockSegmenter: LanguageSegmenter {
     var invalidCandidate = false
     var leftDisplays: [String] = []
     var finishedCount = 0
+    var selectionFailure = false
+    var invalidSelection = false
+
+    func selectionCandidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate]? {
+        if selectionFailure { throw AutoMixedError.invalidCandidate }
+        if invalidSelection {
+            return [.init(token: "invalid", text: "")]
+        }
+        return nil
+    }
 
     func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate] {
         leftDisplays.append(leftDisplay)
@@ -64,6 +74,57 @@ private struct MockSegmenter: LanguageSegmenter {
 }
 
 @Suite @MainActor struct MixedCompositionEngineTests {
+    @Test func directSelectionValidatesRevisionAndDoesNotReplayNavigation() throws {
+        let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: MockConverter())
+        try engine.replaceRaw("ashita")
+        let composingRevision = engine.revision
+        #expect(try !engine.selectCandidate(at: 0, revision: composingRevision, adopt: true))
+        try engine.handle(.tab())
+        let selectingRevision = engine.revision
+        #expect(try !engine.selectCandidate(at: -1, revision: selectingRevision, adopt: false))
+        #expect(try !engine.selectCandidate(at: 2, revision: selectingRevision, adopt: false))
+        #expect(try !engine.selectCandidate(at: 1, revision: composingRevision, adopt: true))
+        #expect(engine.revision == selectingRevision)
+        #expect(try engine.selectCandidate(at: 1, revision: selectingRevision, adopt: false))
+        #expect(engine.revision == selectingRevision + 1)
+        #expect(try engine.markedText().text == "あした")
+        #expect(try engine.selectCandidate(at: 1, revision: engine.revision, adopt: true))
+        #expect(engine.revision == selectingRevision + 2)
+        #expect(engine.state == .composing)
+        #expect(try engine.handle(.enter).commit?.text == "あした")
+    }
+
+    @Test func candidateFailuresReleaseChildrenAndAllowRawCommitOrFurtherEditing() throws {
+        for invalidSelection in [false, true] {
+            let converter = MockConverter()
+            let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)
+            try engine.replaceRaw("ashita API👩‍💻")
+            converter.selectionFailure = !invalidSelection
+            converter.invalidSelection = invalidSelection
+            try engine.handle(.tab())
+            #expect(engine.usedRawFallback)
+            #expect(engine.selectionOptions.isEmpty)
+            #expect(engine.state == .composing)
+            #expect(converter.finishedCount == 1)
+            #expect(try engine.markedText().text == "ashita API👩‍💻")
+            #expect(try engine.handle(.enter).commit?.text == "ashita API👩‍💻")
+            converter.selectionFailure = false
+            converter.invalidSelection = false
+            try engine.handle(.insert("ashita"))
+            #expect(!engine.usedRawFallback)
+            #expect(try engine.markedText().text == "明日")
+        }
+        let converter = MockConverter()
+        let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)
+        try engine.replaceRaw("ashita kyou")
+        try engine.handle(.tab())
+        converter.fails = true // Refresh of the unselected left span fails during adoption.
+        #expect(try engine.selectCandidate(at: 0, revision: engine.revision, adopt: true))
+        #expect(engine.usedRawFallback)
+        #expect(engine.selectionIndex == nil)
+        #expect(try engine.handle(.enter).commit?.text == "ashita kyou")
+    }
+
     @Test func wholeFieldEditingUsesAcceptedLeftDisplayAndReleasesOnCancel() throws {
         let converter = MockConverter()
         let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)
@@ -197,6 +258,8 @@ private struct MockSegmenter: LanguageSegmenter {
         }
     }
 
+    // Each optional expected field in the shared event fixture needs an independent assertion.
+    // swiftlint:disable:next cyclomatic_complexity
     @Test func suppliedEventFixtureBasics() throws {
         let fixture = try loadEventFixture()
         let covered: Set<String> = ["space-literal", "double-space", "candidate-then-commit", "enter-pass-empty",
@@ -251,6 +314,8 @@ private struct MockSegmenter: LanguageSegmenter {
     }
 }
 
+// Mirror the external Python fixture schema without renaming its fields.
+// swiftlint:disable identifier_name
 private struct EventFixture: Decodable {
     let kind: String
     let cases: [Scenario]
@@ -291,6 +356,7 @@ private struct EventFixture: Decodable {
         let last_event_disposition: String?
     }
 }
+// swiftlint:enable identifier_name
 
 private enum FixtureError: Error {
     case missingFixture, unsupportedEvent

@@ -17,6 +17,17 @@ def sha256(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
+def validate_model_header(model):
+    """Fail early on exports the IME cannot load; Swift validates the full schema."""
+    if model.stat().st_size > 5 * 1024 * 1024:
+        raise ValueError("Model exceeds runtime size limit")
+    value = json.loads(model.read_text())
+    if not isinstance(value, dict) or value.get("kind") != "production" or (
+        value.get("schema_version"), value.get("feature_spec_version")
+    ) != (2, "anchored-context-v2"):
+        raise ValueError("The Mixed IME requires a trained v2 runtime export; v1 and fixtures are unsupported")
+
+
 def prepare(app, model, resources):
     build = Path(__file__).resolve().parents[1] / "build"
     app = app.resolve()
@@ -25,13 +36,7 @@ def prepare(app, model, resources):
         raise ValueError("Output must be an app inside this checkout's build directory")
     if app.suffix != ".app" or not (app / "Contents/Info.plist").is_file() or not destination.is_dir():
         raise ValueError("Build the app before preparing resources")
-    if model.stat().st_size > 5 * 1024 * 1024:
-        raise ValueError("Model exceeds runtime size limit")
-    value = json.loads(model.read_text())
-    if value.get("kind") != "production" or (value.get("schema_version"), value.get("feature_spec_version")) not in {
-        (1, "anchored-char-v1"), (2, "anchored-context-v2"),
-    }:
-        raise ValueError("A trained runtime export is required; fixtures are forbidden")
+    validate_model_header(model)
     receipt = json.loads((resources / "receipt.json").read_text())
     if {entry["filename"] for entry in receipt} != RESOURCE_NAMES or len(receipt) != len(RESOURCE_NAMES):
         raise ValueError("Resource receipt must identify exactly the five runtime files")

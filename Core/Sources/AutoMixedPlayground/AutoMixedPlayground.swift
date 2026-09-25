@@ -55,7 +55,9 @@ private final class PlaygroundState: ObservableObject {
         do {
             let args = CommandLine.arguments
             func option(_ name: String) -> String? {
-                guard let index = args.firstIndex(of: name), args.indices.contains(index + 1) else { return nil }
+                guard let index = args.firstIndex(of: name), args.indices.contains(index + 1) else {
+                    return nil
+                }
                 return args[index + 1]
             }
             guard let modelURL = option("--model").map({ URL(fileURLWithPath: $0) }) ??
@@ -82,7 +84,9 @@ private final class PlaygroundState: ObservableObject {
 
     private func resetEngine() throws {
         engine?.cancel()
-        guard let model, let bridge, let englishLexicon, let englishPolicy else { return }
+        guard let model, let bridge, let englishLexicon, let englishPolicy else {
+            return
+        }
         let context: CommittedLeftContext = useContext ? .available(committed) : .unavailable
         engine = try MixedCompositionEngine(
             segmenter: JapanesePreferredSegmenter(model: model, lexicon: englishLexicon, policy: englishPolicy,
@@ -96,7 +100,9 @@ private final class PlaygroundState: ObservableObject {
     }
 
     func edit(_ value: String) {
-        guard value != engine?.buffer.text else { return }
+        guard value != engine?.buffer.text else {
+            return
+        }
         // Bound synchronous work in the playground. The full IME's limits belong to T5/T7.
         guard value.unicodeScalars.count <= 256 else {
             raw = engine?.buffer.text ?? ""
@@ -111,8 +117,7 @@ private final class PlaygroundState: ObservableObject {
     }
 
     func contextChanged() {
-        do { try resetEngine(); try engine?.replaceRaw(raw); try refresh() }
-        catch { self.error = "文脈設定を反映できませんでした。" }
+        do { try resetEngine(); try engine?.replaceRaw(raw); try refresh() } catch { self.error = "文脈設定を反映できませんでした。" }
     }
 
     func event(_ event: MixedInputEvent) {
@@ -129,7 +134,9 @@ private final class PlaygroundState: ObservableObject {
     }
 
     func choose(_ index: Int) {
-        guard selection.indices.contains(index) else { return }
+        guard selection.indices.contains(index) else {
+            return
+        }
         for _ in selection.indices where engine?.selectionIndex != index { event(.tab()) }
         event(.enter)
     }

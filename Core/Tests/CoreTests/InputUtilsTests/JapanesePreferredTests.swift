@@ -159,8 +159,7 @@ import Testing
         for action: MixedInputEvent in [.enter, .backspace] {
             try engine.replaceRaw("ken")
             #expect(preferred.retainedEnglishRegionCount == 1)
-            if case .backspace = action { try engine.replaceRaw("n"); try engine.handle(action) }
-            else { try engine.handle(action) }
+            if case .backspace = action { try engine.replaceRaw("n"); try engine.handle(action) } else { try engine.handle(action) }
             #expect(preferred.retainedEnglishRegionCount == 0)
         }
         try engine.replaceRaw("ken")
@@ -294,7 +293,7 @@ import Testing
         let preferred = try JapanesePreferredSegmenter(model: model, lexicon: .bundled(), policy: .bundled(), focus: UUID())
         let raw = "asitahameetinggaarimasu"
         // The whole string happens to be valid roman input across meeting + ga.
-        #expect(RomanSpanReading.parse(raw)?.suffix == "")
+        #expect(RomanSpanReading.parse(raw)?.suffix.isEmpty == true)
         let spans = try preferred.segment(raw)
         #expect(spans.map(\.sourceRange) == [try ScalarRange(0, 7), try ScalarRange(7, 14), try ScalarRange(14, 23)])
         #expect(spans.map(\.kind) == [.japaneseRoman, .raw, .japaneseRoman])

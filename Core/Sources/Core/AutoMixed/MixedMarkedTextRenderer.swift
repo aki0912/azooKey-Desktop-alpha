@@ -93,6 +93,7 @@ public enum MixedMarkedTextRenderer {
         let literals = try rawPreview ? [:] : punctuation?.displaySlices(raw: raw, spans: spans) ?? [:]
         var text = ""
         var runs: [MixedDisplayRun] = []
+        var displayOffset = 0
         for span in spans {
             let candidate = rawPreview ? nil : candidates[span.id]
             if let candidate {
@@ -102,11 +103,13 @@ public enum MixedMarkedTextRenderer {
                 }
             }
             let content = try candidate?.text ?? literals[span.id] ?? source.slice(span.sourceRange)
-            let displayRange = try UTF16Range(location: text.utf16.count, length: content.utf16.count)
+            let displayRange = try UTF16Range(location: displayOffset, length: content.utf16.count)
+            displayOffset = displayRange.upperBound
             text += content
             runs.append(MixedDisplayRun(span: span, displayRange: displayRange, isAtomic: candidate != nil))
         }
-        guard candidates.keys.allSatisfy({ id in spans.contains(where: { $0.id == id }) }) else {
+        let spanIDs = Set(spans.map(\.id))
+        guard candidates.keys.allSatisfy(spanIDs.contains) else {
             throw AutoMixedError.invalidCandidate
         }
         return MixedMarkedText(text: text, runs: runs, source: source)

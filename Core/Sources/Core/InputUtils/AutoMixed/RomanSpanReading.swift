@@ -19,25 +19,27 @@ struct RomanSpanReading {
     /// Split only at boundaries exposed by the real input table, never at guessed
     /// roman syllables. The caller must independently require Japanese evidence.
     static func independentRuns(_ raw: String, isAtBufferEnd: Bool) -> [IndependentRun]? {
-        guard !raw.isEmpty, raw.unicodeScalars.allSatisfy(isAdmitted) else { return nil }
+        guard !raw.isEmpty, raw.unicodeScalars.allSatisfy(isAdmitted) else {
+            return nil
+        }
         var full = ComposingText()
         full.insertAtCursorPosition(conversionInput(raw), inputStyle: .roman2kana)
         let input = Array(raw), surface = Array(full.convertTarget)
         let boundaries = full.inputIndexToSurfaceIndexMap().sorted { $0.key < $1.key }
         guard boundaries.first?.key == 0, boundaries.first?.value == 0,
-              boundaries.last?.key == input.count, boundaries.last?.value == surface.count else { return nil }
+              boundaries.last?.key == input.count, boundaries.last?.value == surface.count else {
+            return nil
+        }
         var runs: [IndependentRun] = []
         for (left, right) in zip(boundaries, boundaries.dropFirst()) {
-            guard left.value < right.value else { return nil }
+            guard left.value < right.value else {
+                return nil
+            }
             let reading = surface[left.value..<right.value]
             let japanese = reading.allSatisfy(isKana)
             let piece = String(input[left.key..<right.key])
-            if japanese {
-                guard let parsed = parse(piece), parsed.suffix.isEmpty,
-                      parsed.reading == String(reading) else { return nil }
-            } else {
-                // A mixed independent segment cannot safely be divided further.
-                guard reading.allSatisfy({ !isKana($0) }), piece == String(reading) else { return nil }
+            guard matchesIndependentReading(piece, surface: reading, japanese: japanese) else {
+                return nil
             }
             if let previous = runs.last, previous.isJapanese == japanese {
                 runs[runs.count - 1] = IndependentRun(range: previous.range.lowerBound..<right.key, isJapanese: japanese)
@@ -55,14 +57,29 @@ struct RomanSpanReading {
                 runs.append(IndependentRun(range: range, isJapanese: true))
             }
         }
-        guard runs.first?.isJapanese == true, runs.contains(where: { !$0.isJapanese }) else { return nil }
+        guard runs.first?.isJapanese == true, runs.contains(where: { !$0.isJapanese }) else {
+            return nil
+        }
         return runs
+    }
+
+    private static func matchesIndependentReading(_ piece: String, surface: ArraySlice<Character>, japanese: Bool) -> Bool {
+        if japanese {
+            guard let parsed = parse(piece), parsed.suffix.isEmpty else {
+                return false
+            }
+            return parsed.reading == String(surface)
+        }
+        // A mixed independent segment cannot safely be divided further.
+        return surface.allSatisfy({ !isKana($0) }) && piece == String(surface)
     }
 
     /// Last independent input-table segment, which can contain several kana (kya, tte, nki).
     /// Check both halves against the full reading; never split an input-table dependency.
     static func splitFinalKana(_ raw: String) -> (prefix: String, tail: String)? {
-        guard let parsed = parse(raw), parsed.suffix.isEmpty else { return nil }
+        guard let parsed = parse(raw), parsed.suffix.isEmpty else {
+            return nil
+        }
         var full = ComposingText()
         full.insertAtCursorPosition(conversionInput(raw), inputStyle: .roman2kana)
         guard let boundary = full.inputIndexToSurfaceIndexMap().keys.filter({ $0 > 0 && $0 < raw.count }).max() else {
@@ -71,7 +88,9 @@ struct RomanSpanReading {
         let prefix = String(raw.prefix(boundary)), tail = String(raw.dropFirst(boundary))
         guard let left = parse(prefix), left.suffix.isEmpty,
               let right = parse(tail), right.suffix.isEmpty,
-              left.reading + right.reading == parsed.reading else { return nil }
+              left.reading + right.reading == parsed.reading else {
+            return nil
+        }
         return (prefix, tail)
     }
 
@@ -82,7 +101,9 @@ struct RomanSpanReading {
     private static func parseUnmeasured(_ raw: String) -> Self? {
         // The admitted characters are each one scalar/grapheme. Hyphen normalization
         // changes neither count; arbitrary Unicode input must not use this mapping.
-        guard !raw.isEmpty, raw.unicodeScalars.allSatisfy(isAdmitted) else { return nil }
+        guard !raw.isEmpty, raw.unicodeScalars.allSatisfy(isAdmitted) else {
+            return nil
+        }
         var full = ComposingText()
         full.insertAtCursorPosition(conversionInput(raw), inputStyle: .roman2kana)
         // A Japanese long-vowel word can preview its terminal n as ん. Use the
@@ -100,7 +121,9 @@ struct RomanSpanReading {
         // An interior untranslated sequence is not a valid Japanese run.
         guard surface.dropFirst(kanaCount).allSatisfy({ character in
             character.unicodeScalars.allSatisfy { (97...122).contains($0.value) || $0.value == 39 }
-        }) else { return nil }
+        }) else {
+            return nil
+        }
         if kanaCount < surface.count {
             // The dependency does not expose its pending-prefix table. Admit only suffixes
             // which its actual composing API can complete with one further roman key.
@@ -110,7 +133,9 @@ struct RomanSpanReading {
                 probe.insertAtCursorPosition(String(key), inputStyle: .roman2kana)
                 return probe.convertTarget.allSatisfy(isKana)
             }
-            guard canComplete else { return nil }
+            guard canComplete else {
+                return nil
+            }
         }
         let boundary = full.inputIndexToSurfaceIndexMap()
             .filter { $0.value <= kanaCount }
@@ -119,7 +144,9 @@ struct RomanSpanReading {
         var complete = ComposingText()
         complete.insertAtCursorPosition(conversionInput(prefix), inputStyle: .roman2kana)
         guard complete.convertTarget.allSatisfy(isKana),
-              full.convertTarget.hasPrefix(complete.convertTarget) else { return nil }
+              full.convertTarget.hasPrefix(complete.convertTarget) else {
+            return nil
+        }
         return Self(prefix: prefix, suffix: String(raw.dropFirst(boundary)), reading: complete.convertTarget, completesTerminalN: false)
     }
 

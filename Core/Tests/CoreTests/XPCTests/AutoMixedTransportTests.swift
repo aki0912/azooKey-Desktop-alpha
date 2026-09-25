@@ -1,8 +1,8 @@
 @testable import Core
-import Foundation
-import Testing
 import Crypto
+import Foundation
 import KanaKanjiConverterModuleWithDefaultDictionary
+import Testing
 
 @Suite @MainActor struct AutoMixedTransportTests {
     struct Segmenter: LanguageSegmenter {
@@ -145,7 +145,7 @@ import KanaKanjiConverterModuleWithDefaultDictionary
         #expect(host.pendingCommitCount == 8)
         let commit = try #require(blocked.autoMixed?.commits.first)
         _ = try send(.commitApplied(commit.commitID))
-        #expect(try send(.commit).autoMixed?.raw == "")
+        #expect(try send(.commit).autoMixed?.raw.isEmpty == true)
         let limit = String(repeating: "a", count: 256)
         _ = try send(.key(key(limit)))
         let overflow = try send(.key(key("b")))

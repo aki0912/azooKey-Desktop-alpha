@@ -41,14 +41,18 @@ public struct EnglishLexicon: Sendable {
     }
 
     func prefixLevel(_ raw: String) -> Int? {
-        guard let key = Self.key(raw) else { return nil }
+        guard let key = Self.key(raw) else {
+            return nil
+        }
         for (level, entries) in levels {
             var low = 0, high = entries.count
             while low < high {
                 let middle = (low + high) / 2
                 if entries[middle] < key { low = middle + 1 } else { high = middle }
             }
-            if low < entries.count, entries[low].hasPrefix(key) { return level }
+            if low < entries.count, entries[low].hasPrefix(key) {
+                return level
+            }
         }
         return nil
     }
@@ -57,8 +61,10 @@ public struct EnglishLexicon: Sendable {
         let bytes = Array(raw.utf8)
         guard (1...maximumWordLength).contains(bytes.count), bytes.first != 39, bytes.last != 39,
               bytes.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || $0 == 39 }),
-              bytes.filter({ $0 == 39 }).count <= 1 else { return nil }
-        return String(decoding: bytes.map { (65...90).contains($0) ? $0 + 32 : $0 }, as: UTF8.self)
+              bytes.filter({ $0 == 39 }).count <= 1 else {
+            return nil
+        }
+        return String(bytes: bytes.map { (65...90).contains($0) ? $0 + 32 : $0 }, encoding: .utf8)
     }
 }
 

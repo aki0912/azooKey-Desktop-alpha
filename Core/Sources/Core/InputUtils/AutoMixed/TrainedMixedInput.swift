@@ -38,7 +38,9 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
             }
         }
         return try proposed.map { span in
-            guard span.kind == .japaneseRoman else { return span }
+            guard span.kind == .japaneseRoman else {
+                return span
+            }
             if let parsed = RomanSpanReading.parse(try source.slice(span.sourceRange)), !parsed.prefix.isEmpty,
                parsed.suffix.isEmpty || span.sourceRange.upperBound == source.scalarCount {
                 return span
@@ -56,13 +58,19 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
     private func kanaTail(_ raw: String, source: TextOffsetMap, span: MixedSpan, evidence: ContextualLanguageSegmenter.Evidence) throws -> [MixedSpan]? {
         guard let thresholds = model.contextualThresholds,
               span.sourceRange.upperBound == source.scalarCount,
-              let split = RomanSpanReading.splitFinalKana(try source.slice(span.sourceRange)) else { return nil }
+              let split = RomanSpanReading.splitFinalKana(try source.slice(span.sourceRange)) else {
+            return nil
+        }
         let end = span.sourceRange.lowerBound + split.prefix.unicodeScalars.count
         let scores = Array(evidence.probabilities[span.sourceRange.lowerBound..<span.sourceRange.upperBound])
-        guard scores.allSatisfy({ $0 >= thresholds.minimumJapanese }) else { return nil }
+        guard scores.allSatisfy({ $0 >= thresholds.minimumJapanese }) else {
+            return nil
+        }
         let prefixScores = scores.prefix(split.prefix.unicodeScalars.count)
         let enter = context.isAvailable ? model.enterJapaneseThreshold : thresholds.enterWithoutContext
-        guard prefixScores.reduce(0, +) / Double(prefixScores.count) >= enter else { return nil }
+        guard prefixScores.reduce(0, +) / Double(prefixScores.count) >= enter else {
+            return nil
+        }
         // Local evidence for showing the tail as kana instead of RAW. This is not a
         // calibrated word probability. Reuse the exported margin without lowering it.
         let margin = scores.suffix(split.tail.unicodeScalars.count).reduce(0.0) { result, p in
@@ -72,7 +80,9 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
         guard margin >= thresholds.minimumPathMargin,
               let complete = try hypotheses(source.slice(ScalarRange(0, end))).last,
               complete.kind == .japaneseRoman,
-              complete.sourceRange == (try ScalarRange(span.sourceRange.lowerBound, end)) else { return nil }
+              complete.sourceRange == (try ScalarRange(span.sourceRange.lowerBound, end)) else {
+            return nil
+        }
         return [complete, try MixedSpan(sourceRange: ScalarRange(end, source.scalarCount), kind: .japaneseKana)]
     }
 
@@ -81,20 +91,26 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
         guard let thresholds = model.contextualThresholds,
               span.sourceRange.upperBound == source.scalarCount,
               let parsed = RomanSpanReading.parse(try source.slice(span.sourceRange)),
-              !parsed.prefix.isEmpty, !parsed.suffix.isEmpty else { return false }
+              !parsed.prefix.isEmpty, !parsed.suffix.isEmpty else {
+            return false
+        }
 
         // Check current evidence before removing the unfinished suffix. A previous Japanese
         // prefix must not override new RAW evidence, a hard protection, or low confidence.
         let floor = max(model.holdJapaneseThreshold, thresholds.minimumJapanese)
         for index in span.sourceRange.lowerBound..<span.sourceRange.upperBound {
-            guard evidence.probabilities[index] >= floor else { return false }
+            guard evidence.probabilities[index] >= floor else {
+                return false
+            }
         }
 
         let end = span.sourceRange.lowerBound + parsed.prefix.unicodeScalars.count
         let completeRaw = try source.slice(ScalarRange(0, end))
         // Retain surrounding raw and the same context. Require the existing entry, minimum,
         // and margin gates to accept exactly this prefix, without expanding another span.
-        guard let complete = try hypotheses(completeRaw).last else { return false }
+        guard let complete = try hypotheses(completeRaw).last else {
+            return false
+        }
         return complete.kind == .japaneseRoman && complete.sourceRange.lowerBound == span.sourceRange.lowerBound
             && complete.sourceRange.upperBound == end
     }
@@ -147,10 +163,14 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
             guard span.sourceRange.count == raw.unicodeScalars.count,
                   span.sourceRange.upperBound <= sourceScalarCount,
                   let parsed = RomanSpanReading.parse(raw),
-                  parsed.suffix.isEmpty || span.sourceRange.upperBound == sourceScalarCount else { return [] }
+                  parsed.suffix.isEmpty || span.sourceRange.upperBound == sourceScalarCount else {
+                return []
+            }
             if !allowJapaneseReadingFallback {
                 guard span.sourceRange.upperBound == sourceScalarCount, parsed.suffix.isEmpty,
-                      !parsed.reading.isEmpty else { return [] }
+                      !parsed.reading.isEmpty else {
+                    return []
+                }
             }
             return [MixedCandidate(token: UUID().uuidString, text: parsed.reading + parsed.suffix)]
         }

@@ -17,10 +17,14 @@ public struct MixedPunctuationPolicy: Sendable {
             ProtectedSpanDetector.detect(text) { stem in
                 // Do not re-protect a bare dotted token already disambiguated as Japanese
                 // by the runtime segmenter. Explicit structured tokens still win upstream.
-                guard stem.lowerBound >= offset else { return true }
+                guard stem.lowerBound >= offset else {
+                    return true
+                }
                 let lower = stem.lowerBound - offset, upper = stem.upperBound - offset
                 let covered = spans.reduce(0) { count, span in
-                    guard span.kind == .japaneseRoman || span.kind == .japaneseKana else { return count }
+                    guard span.kind == .japaneseRoman || span.kind == .japaneseKana else {
+                        return count
+                    }
                     return count + max(0, min(upper, span.sourceRange.upperBound) - max(lower, span.sourceRange.lowerBound))
                 }
                 return covered != stem.count
@@ -32,14 +36,8 @@ public struct MixedPunctuationPolicy: Sendable {
         let protected = context.isEmpty ? localProtected : protections((leftContext.text ?? "") + raw, offset: context.count)
         var english = context.last.map(Self.isLetter) ?? false
         var previous = context.last
-        var brackets: [Unicode.Scalar] = []
-        var parentheses: [Unicode.Scalar] = []
-        for scalar in context {
-            if scalar == "[" || scalar == "「" { brackets.append(scalar) }
-            if scalar == "]" || scalar == "」", !brackets.isEmpty { brackets.removeLast() }
-            if scalar == "(" || scalar == "（" { parentheses.append(scalar) }
-            if scalar == ")" || scalar == "）", !parentheses.isEmpty { parentheses.removeLast() }
-        }
+        var brackets = BracketState()
+        for scalar in context { brackets.track(scalar) }
         var result: [UUID: String] = [:]
         for span in spans {
             var output = String.UnicodeScalarView()
@@ -53,19 +51,14 @@ public struct MixedPunctuationPolicy: Sendable {
                     // Retain decimals, dates, grouped numbers, negative numbers and indices,
                     // including their incomplete prefixes while the next key is pending.
                     let numeric = previous.map(Self.isDigit) == true || next.map(Self.isDigit) == true
-                    if scalar == "]", let opening = brackets.last {
-                        display = opening == "「" ? "」" : "]"
-                    } else if scalar == ")", let opening = parentheses.last {
-                        display = opening == "（" ? "）" : ")"
+                    if let closing = brackets.replacement(for: scalar) {
+                        display = closing
                     } else if !english && !numeric {
                         display = replacement
                     }
                 }
                 output.append(display)
-                if display == "[" || display == "「" { brackets.append(display) }
-                if display == "]" || display == "」", !brackets.isEmpty { brackets.removeLast() }
-                if display == "(" || display == "（" { parentheses.append(display) }
-                if display == ")" || display == "）", !parentheses.isEmpty { parentheses.removeLast() }
+                brackets.track(display)
                 if Self.isLetter(scalar) {
                     english = span.kind == .raw
                 } else if !Self.isASCIIPunctuation(display) {
@@ -77,6 +70,31 @@ public struct MixedPunctuationPolicy: Sendable {
             if span.kind == .literal { result[span.id] = String(output) }
         }
         return result
+    }
+
+    private struct BracketState {
+        private var brackets: [Unicode.Scalar] = []
+        private var parentheses: [Unicode.Scalar] = []
+
+        mutating func track(_ scalar: Unicode.Scalar) {
+            switch scalar {
+            case "[", "「": brackets.append(scalar)
+            case "]", "」":
+                if !brackets.isEmpty { brackets.removeLast() }
+            case "(", "（": parentheses.append(scalar)
+            case ")", "）":
+                if !parentheses.isEmpty { parentheses.removeLast() }
+            default: break
+            }
+        }
+
+        func replacement(for scalar: Unicode.Scalar) -> Unicode.Scalar? {
+            switch scalar {
+            case "]": brackets.last.map { $0 == "「" ? "」" : "]" }
+            case ")": parentheses.last.map { $0 == "（" ? "）" : ")" }
+            default: nil
+            }
+        }
     }
 
     private static func japanese(_ scalar: Unicode.Scalar) -> Unicode.Scalar? {

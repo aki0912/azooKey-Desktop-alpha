@@ -29,7 +29,9 @@ public enum MixedPerformance {
     }
     @TaskLocal public static var trace: Trace?
     public static func measure<T>(_ phase: Phase, _ operation: () throws -> T) rethrows -> T {
-        guard let trace else { return try operation() }
+        guard let trace else {
+            return try operation()
+        }
         let start = DispatchTime.now().uptimeNanoseconds
         defer { trace.add(phase, nanoseconds: DispatchTime.now().uptimeNanoseconds - start) }
         return try operation()

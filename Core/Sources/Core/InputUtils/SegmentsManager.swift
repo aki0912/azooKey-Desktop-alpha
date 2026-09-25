@@ -602,7 +602,9 @@ public final class SegmentsManager {
     /// Invoked only by the bridge's explicit commit acknowledgement boundary, never preview.
     @MainActor
     func recordMixedCommittedCandidate(_ candidate: Candidate) {
-        guard context.learningEnabled, Config.Learning().value.learningType != .nothing else { return }
+        guard context.learningEnabled, Config.Learning().value.learningType != .nothing else {
+            return
+        }
         self.kanaKanjiConverter.setCompletedData(candidate)
         self.kanaKanjiConverter.updateLearningData(candidate)
     }

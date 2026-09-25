@@ -41,6 +41,11 @@ import Foundation
     }
 
     public func cancel() {
+        clearComposition()
+        revision &+= 1
+    }
+
+    private func clearComposition() {
         readingPreview = nil
         segmenter.reset()
         converter.finishComposition()
@@ -51,7 +56,6 @@ import Foundation
         closeSelection()
         state = .idle
         usedRawFallback = false
-        revision &+= 1
     }
 
     public func markedText() throws -> MixedMarkedText {
@@ -70,13 +74,8 @@ import Foundation
 
     @discardableResult
     public func handle(_ event: MixedInputEvent) throws -> MixedEventResult {
-        if buffer.isEmpty {
-            switch event {
-            case .insert, .space:
-                break
-            default:
-                return MixedEventResult(disposition: .fallthroughToApplication, commit: nil)
-            }
+        if buffer.isEmpty, !startsComposition(event) {
+            return MixedEventResult(disposition: .fallthroughToApplication, commit: nil)
         }
         revision &+= 1
         switch event {
@@ -90,38 +89,43 @@ import Foundation
             try deleteBackward()
         case .tab(let reverse):
             if readingPreview != nil { try edit { _ in } }
-            try selectCandidate(reverse: reverse)
+            do {
+                try cycleCandidate(reverse: reverse)
+            } catch {
+                try fallBackToRaw()
+            }
         case .escape:
-            if state == .selecting {
-                state = selectionFromRawPreview ? .rawPreview : .composing
-                closeSelection()
-            } else {
-                readingPreview = nil
-                state = .rawPreview
-            }
+            escape()
         case .enter:
-            if state == .selecting {
-                if let id = selectingSpanID, let index = selectionIndex, !selectionFromRawPreview,
-                   spans.contains(where: { $0.id == id && $0.kind == .japaneseRoman }) {
-                    accepted[id] = selectionOptions[index]
-                }
-                state = selectionFromRawPreview ? .rawPreview : .composing
-                closeSelection()
-                if state == .composing { try refreshCandidates() }
-            } else {
-                let commit = try MixedCommit(text: markedText().text, sourceScalarCount: buffer.offsets.scalarCount)
-                segmenter.reset()
-                converter.finishComposition()
-                buffer = RawCompositionBuffer()
-                spans = []
-                candidates = [:]
-                accepted = [:]
-                readingPreview = nil
-                closeSelection()
-                usedRawFallback = false
-                state = .idle
-                return MixedEventResult(disposition: .consumed, commit: commit)
-            }
+            return try enter()
+        }
+        return MixedEventResult(disposition: .consumed, commit: nil)
+    }
+
+    private func startsComposition(_ event: MixedInputEvent) -> Bool {
+        switch event {
+        case .insert, .space: true
+        default: false
+        }
+    }
+
+    private func escape() {
+        if state == .selecting {
+            state = selectionFromRawPreview ? .rawPreview : .composing
+            closeSelection()
+        } else {
+            readingPreview = nil
+            state = .rawPreview
+        }
+    }
+
+    private func enter() throws -> MixedEventResult {
+        if state == .selecting {
+            try adoptCandidate()
+        } else {
+            let commit = try MixedCommit(text: markedText().text, sourceScalarCount: buffer.offsets.scalarCount)
+            clearComposition()
+            return MixedEventResult(disposition: .consumed, commit: commit)
         }
         return MixedEventResult(disposition: .consumed, commit: nil)
     }
@@ -133,7 +137,36 @@ import Foundation
         selectionFromRawPreview = false
     }
 
-    private func selectCandidate(reverse: Bool) throws {
+    /// Apply one candidate-window action against the snapshot the host displayed.
+    /// Direct selection must not replay Tab events or depend on the distance to the row.
+    @discardableResult
+    public func selectCandidate(at index: Int, revision expectedRevision: UInt64, adopt: Bool) throws -> Bool {
+        guard state == .selecting, revision == expectedRevision, selectionOptions.indices.contains(index) else {
+            return false
+        }
+        revision &+= 1
+        selectionIndex = index
+        if adopt { try adoptCandidate() }
+        return true
+    }
+
+    private func adoptCandidate() throws {
+        if let id = selectingSpanID, let index = selectionIndex, !selectionFromRawPreview,
+           spans.contains(where: { $0.id == id && $0.kind == .japaneseRoman }) {
+            accepted[id] = selectionOptions[index]
+        }
+        state = selectionFromRawPreview ? .rawPreview : .composing
+        closeSelection()
+        if state == .composing {
+            do {
+                try refreshCandidates()
+            } catch {
+                try fallBackToRaw()
+            }
+        }
+    }
+
+    private func cycleCandidate(reverse: Bool) throws {
         if let index = selectionIndex {
             selectionIndex = (index + (reverse ? -1 : 1) + selectionOptions.count) % selectionOptions.count
             return
@@ -206,13 +239,7 @@ import Foundation
         closeSelection()
         usedRawFallback = false
         if buffer.isEmpty {
-            readingPreview = nil
-            segmenter.reset()
-            converter.finishComposition()
-            spans = []
-            candidates = [:]
-            accepted = [:]
-            state = .idle
+            clearComposition()
             return
         }
         do {
@@ -223,8 +250,9 @@ import Foundation
             let suffixEdit = oldBuffer.text.unicodeScalars.starts(with: buffer.text.unicodeScalars)
                 || buffer.text.unicodeScalars.starts(with: oldBuffer.text.unicodeScalars)
             var unchangedIDs = Set<UUID>()
+            let previousByRange = Dictionary(uniqueKeysWithValues: oldSpans.map { ($0.sourceRange, $0) })
             spans = try proposed.enumerated().map { index, span in
-                if let previous = oldSpans.first(where: { $0.sourceRange == span.sourceRange && $0.kind == span.kind }),
+                if let previous = previousByRange[span.sourceRange], previous.kind == span.kind,
                    try oldBuffer.offsets.slice(previous.sourceRange).unicodeScalars.elementsEqual(
                     buffer.offsets.slice(span.sourceRange).unicodeScalars
                    ) {
@@ -248,15 +276,21 @@ import Foundation
             accepted = accepted.filter { id, _ in unchangedIDs.contains(id) }
             try refreshCandidates()
         } catch {
-            readingPreview = nil
-            segmenter.reset()
-            converter.finishComposition()
-            // Provider failure is reversible and cannot remove the original input.
-            spans = [try MixedSpan(sourceRange: ScalarRange(0, buffer.offsets.scalarCount), kind: .unresolved)]
-            candidates = [:]
-            accepted = [:]
-            usedRawFallback = true
+            try fallBackToRaw()
         }
+        state = .composing
+    }
+
+    private func fallBackToRaw() throws {
+        readingPreview = nil
+        segmenter.reset()
+        converter.finishComposition()
+        closeSelection()
+        // Editing, opening candidates and adoption share the same reversible fallback.
+        spans = [try MixedSpan(sourceRange: ScalarRange(0, buffer.offsets.scalarCount), kind: .unresolved)]
+        candidates = [:]
+        accepted = [:]
+        usedRawFallback = true
         state = .composing
     }
 

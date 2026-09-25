@@ -1,6 +1,6 @@
+@testable import Core
 import Foundation
 import Testing
-@testable import Core
 
 @Suite struct MixedDiagnosticsTests {
     @Test func rawContextAndUnvalidatedSessionNamesCannotReachLogPayload() throws {

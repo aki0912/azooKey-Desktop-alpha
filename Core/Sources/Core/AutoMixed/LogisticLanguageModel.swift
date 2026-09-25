@@ -74,19 +74,7 @@ public struct LogisticLanguageModel: Sendable {
                 throw LanguageModelError.invalidVocabulary
             }
         }
-        let numbers = file.coefficients + [file.intercept, file.calibration.a, file.calibration.c,
-                                          file.decoder.switchPenalty, file.thresholds.enterJA, file.thresholds.holdJA]
-        guard numbers.allSatisfy(\.isFinite), file.decoder.switchPenalty >= 0,
-              0 <= file.thresholds.holdJA, file.thresholds.holdJA <= file.thresholds.enterJA,
-              file.thresholds.enterJA <= 1 else { throw LanguageModelError.invalidNumbers }
-        if let policy = file.thresholds.contextual {
-            guard policy.enterWithoutContext.isFinite, policy.minimumJapanese.isFinite,
-                  policy.minimumPathMargin.isFinite,
-                  (file.thresholds.enterJA...1).contains(policy.enterWithoutContext),
-                  (0...1).contains(policy.minimumJapanese), policy.minimumPathMargin >= 0 else {
-                throw LanguageModelError.invalidNumbers
-            }
-        }
+        try file.validateNumbers()
         indices = Dictionary(uniqueKeysWithValues: vocabulary.enumerated().map { ($0.element, $0.offset) })
         weights = file.coefficients
         intercept = file.intercept
@@ -171,6 +159,22 @@ private struct ModelFile: Decodable {
         trainingManifestSHA256 = try values.decode(String.self, forKey: .trainingManifestSHA256)
     }
 
+    func validateNumbers() throws {
+        let numbers = coefficients + [intercept, calibration.a, calibration.c,
+                                          decoder.switchPenalty, thresholds.enterJA, thresholds.holdJA]
+        guard numbers.allSatisfy(\.isFinite), decoder.switchPenalty >= 0,
+              0 <= thresholds.holdJA, thresholds.holdJA <= thresholds.enterJA,
+              thresholds.enterJA <= 1 else { throw LanguageModelError.invalidNumbers }
+        if let policy = thresholds.contextual {
+            guard policy.enterWithoutContext.isFinite, policy.minimumJapanese.isFinite,
+                  policy.minimumPathMargin.isFinite,
+                  (thresholds.enterJA...1).contains(policy.enterWithoutContext),
+                  (0...1).contains(policy.minimumJapanese), policy.minimumPathMargin >= 0 else {
+                throw LanguageModelError.invalidNumbers
+            }
+        }
+    }
+
     struct Calibration: Decodable {
         let a: Double
         let c: Double
@@ -218,7 +222,7 @@ private struct ModelField: CodingKey {
     let stringValue: String
     var intValue: Int? { nil }
     init?(stringValue: String) { self.stringValue = stringValue }
-    init?(intValue: Int) { return nil }
+    init?(intValue: Int) { nil }
 }
 
 /// Enforce required fields and additionalProperties=false at every schema object.

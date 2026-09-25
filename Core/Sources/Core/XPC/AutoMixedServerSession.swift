@@ -31,8 +31,12 @@ import Foundation
     }
 
     public func handle(_ request: AutoMixedRequest) throws -> ConverterServerResponse {
-        guard request.serverEpoch == epoch else { return try response(request, status: .restartRequired, expose: false) }
-        if request == lastRequest, let lastResponse { return lastResponse }
+        guard request.serverEpoch == epoch else {
+            return try response(request, status: .restartRequired, expose: false)
+        }
+        if request == lastRequest, let lastResponse {
+            return lastResponse
+        }
         if let lastRequest, request.operationID <= lastRequest.operationID {
             return try response(request, status: .staleRequest, expose: false)
         }
@@ -40,7 +44,9 @@ import Foundation
             return try response(request, status: .unsupportedInputStyle, expose: false)
         }
         if request.focusID != focus {
-            guard request.startsFocus else { return try response(request, status: .staleRequest, expose: false) }
+            guard request.startsFocus else {
+                return try response(request, status: .staleRequest, expose: false)
+            }
             engine?.cancel()
             pendingCommits = []
             focus = request.focusID
@@ -54,41 +60,9 @@ import Foundation
                 rightSideContext: request.context.rightSideContext.map { String($0.prefix(30)) })
             engine = try factory(context)
         }
-        var status: AutoMixedStatus = .ready
-        switch request.action {
-        case .key(let key):
-            if let engine, let input = AutoMixedKeyRouter.input(key) {
-                switch input {
-                case .insert(let text) where engine.buffer.offsets.scalarCount + text.unicodeScalars.count > 256:
-                    status = .inputLimit
-                case .space where engine.buffer.offsets.scalarCount >= 256:
-                    status = .inputLimit
-                case .enter where engine.state != .selecting:
-                    if try !commit(engine) { status = .awaitingAcknowledgement }
-                default:
-                    _ = try engine.handle(input)
-                }
-            }
-        case .commit:
-            // OS commit is not candidate adoption: commit the complete displayed composition.
-            if let engine, try !commit(engine) { status = .awaitingAcknowledgement }
-        case .stop:
-            // An empty legacy manager is irrelevant. Preserve mixed raw until commit/deactivate.
-            break
-        case .deactivate:
-            engine?.cancel()
-            engine = nil
-            pendingCommits = []
-            focus = nil
-        case .selectCandidate(let index, let revision, let adopt):
-            guard let engine, revision == engine.revision, engine.state == .selecting,
-                  engine.selectionOptions.indices.contains(index) else {
-                return try response(request, status: .staleRequest)
-            }
-            while engine.selectionIndex != index { try engine.handle(.tab()) }
-            if adopt { try engine.handle(.enter) }
-        case .commitApplied(let commitID):
-            pendingCommits.removeAll { $0.commitID == commitID }
+        var status = try apply(request.action)
+        if status == .staleRequest {
+            return try response(request, status: status)
         }
         if engine?.usedRawFallback == true { status = .rawFallback }
         if let engine, engine.buffer.isEmpty {
@@ -102,10 +76,57 @@ import Foundation
         return result
     }
 
+    private func apply(_ action: AutoMixedAction) throws -> AutoMixedStatus {
+        var status: AutoMixedStatus = .ready
+        switch action {
+        case .key(let key):
+            return try applyKey(key)
+        case .commit:
+            // OS commit is not candidate adoption: commit the complete displayed composition.
+            if let engine, try !commit(engine) { status = .awaitingAcknowledgement }
+        case .stop:
+            // An empty legacy manager is irrelevant. Preserve mixed raw until commit/deactivate.
+            break
+        case .deactivate:
+            engine?.cancel()
+            engine = nil
+            pendingCommits = []
+            focus = nil
+        case .selectCandidate(let index, let revision, let adopt):
+            guard let engine, try engine.selectCandidate(at: index, revision: revision, adopt: adopt) else {
+                return .staleRequest
+            }
+        case .commitApplied(let commitID):
+            pendingCommits.removeAll { $0.commitID == commitID }
+        }
+        return status
+    }
+
+    private func applyKey(_ key: KeyEventCore) throws -> AutoMixedStatus {
+        var status: AutoMixedStatus = .ready
+        if let engine, let input = AutoMixedKeyRouter.input(key) {
+            switch input {
+            case .insert(let text) where engine.buffer.offsets.scalarCount + text.unicodeScalars.count > 256:
+                status = .inputLimit
+            case .space where engine.buffer.offsets.scalarCount >= 256:
+                status = .inputLimit
+            case .enter where engine.state != .selecting:
+                if try !commit(engine) { status = .awaitingAcknowledgement }
+            default:
+                _ = try engine.handle(input)
+            }
+        }
+        return status
+    }
+
     private func commit(_ engine: MixedCompositionEngine) throws -> Bool {
-        guard !engine.buffer.isEmpty else { return true }
+        guard !engine.buffer.isEmpty else {
+            return true
+        }
         // Bound missing acknowledgements without silently evicting unapplied commits.
-        guard pendingCommits.count < Self.maximumPendingCommits else { return false }
+        guard pendingCommits.count < Self.maximumPendingCommits else {
+            return false
+        }
         let effect = try AutoMixedCommitEffect(commitID: UUID(), compositionID: compositionID, text: engine.markedText().text)
         pendingCommits.append(effect)
         engine.cancel()

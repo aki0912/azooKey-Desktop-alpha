@@ -1,12 +1,12 @@
 /// The sole source of input text. Displayed candidates never mutate this buffer.
 public struct RawCompositionBuffer: Sendable {
-    public private(set) var text: String
+    public var text: String { offsets.text }
     public private(set) var cursorScalarOffset: Int
-    public var offsets: TextOffsetMap { TextOffsetMap(text) }
+    public private(set) var offsets: TextOffsetMap
     public var isEmpty: Bool { text.isEmpty }
 
     public init(_ text: String = "") {
-        self.text = text
+        self.offsets = TextOffsetMap(text)
         self.cursorScalarOffset = text.unicodeScalars.count
     }
 
@@ -25,7 +25,10 @@ public struct RawCompositionBuffer: Sendable {
         guard map.isGraphemeBoundary(range.lowerBound), map.isGraphemeBoundary(range.upperBound) else {
             throw AutoMixedError.notGraphemeBoundary
         }
-        text.unicodeScalars.replaceSubrange(lower..<upper, with: replacement.unicodeScalars)
+        var updated = text
+        updated.unicodeScalars.replaceSubrange(lower..<upper, with: replacement.unicodeScalars)
+        // One immutable map per edit; readers and copied buffers share its value safely.
+        offsets = TextOffsetMap(updated)
         let insertedEnd = range.lowerBound + replacement.unicodeScalars.count
         // An inserted combining mark/ZWJ can join its neighbours. Never leave the caret
         // inside the new grapheme, including after deleting text between two graphemes.

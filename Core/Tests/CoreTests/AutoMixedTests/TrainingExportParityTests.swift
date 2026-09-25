@@ -15,6 +15,8 @@ import Testing
         try verifyExports(variable: "AUTO_MIXED_APPROVED_EXPORTS", fixture: false)
     }
 
+    // Validate every optional section of the external export in a single parity replay.
+    // swiftlint:disable:next cyclomatic_complexity
     private func verifyExports(variable: String, fixture: Bool) throws {
         let paths = try #require(ProcessInfo.processInfo.environment[variable])
         var versions = Set<String>()
@@ -81,6 +83,8 @@ import Testing
     }
 }
 
+// Mirror the external Python fixture schema without renaming its fields.
+// swiftlint:disable identifier_name
 private struct ExportParity: Decodable {
     let feature_spec_version: String
     let vectors: [Vector]
@@ -107,3 +111,4 @@ private struct ExportParity: Decodable {
         let path: [BinaryLanguageLabel]
     }
 }
+// swiftlint:enable identifier_name

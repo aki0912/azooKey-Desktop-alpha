@@ -40,8 +40,7 @@ private final class ProbeReply: @unchecked Sendable {
                 return
             }
             proxy.handleCommand(encoded) { data, error in
-                if let data, error == nil { reply.finish(.success(data)) }
-                else { reply.finish(.failure(ProbeError.server)) }
+                if let data, error == nil { reply.finish(.success(data)) } else { reply.finish(.failure(ProbeError.server)) }
             }
         }
         return try ConverterServerCodec.decodeResponse(from: data)
@@ -274,8 +273,7 @@ private final class ProbeReply: @unchecked Sendable {
         }
         func commit(_ expected: String) async throws {
             let result = try await send(.commit)
-            if expected.isEmpty { #expect(result.autoMixed?.commits.isEmpty == true) }
-            else {
+            if expected.isEmpty { #expect(result.autoMixed?.commits.isEmpty == true) } else {
                 let effect = try #require(result.autoMixed?.commits.first)
                 #expect(effect.text == expected)
                 let ack = try await send(.commitApplied(effect.commitID))

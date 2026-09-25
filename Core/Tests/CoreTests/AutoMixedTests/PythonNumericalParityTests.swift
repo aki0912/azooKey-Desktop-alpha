@@ -20,6 +20,8 @@ import Testing
     }
 }
 
+// Mirror the external Python fixture schema without renaming its fields.
+// swiftlint:disable identifier_name
 private struct Reference: Decodable {
     let feature_spec_version: String
     let scores: [ScoreVector]
@@ -31,3 +33,4 @@ private struct Reference: Decodable {
         let path: [BinaryLanguageLabel]
     }
 }
+// swiftlint:enable identifier_name

@@ -41,13 +41,17 @@ public enum MixedDiagnostics {
 
     private struct Configuration: Decodable { let enabled: Bool; let expiresAt: TimeInterval }
     private static let expiry: TimeInterval? = {
-        guard IMEIdentity.current == .mixed, var directory = Bundle.main.executableURL?.deletingLastPathComponent() else { return nil }
+        guard IMEIdentity.current == .mixed, var directory = Bundle.main.executableURL?.deletingLastPathComponent() else {
+            return nil
+        }
         while directory.path != "/" {
             if directory.lastPathComponent == "Contents" {
                 let file = directory.appendingPathComponent("Resources/auto-mixed-diagnostics.json")
                 guard let data = try? Data(contentsOf: file), data.count <= 4096,
                       let config = try? JSONDecoder().decode(Configuration.self, from: data), config.enabled,
-                      config.expiresAt <= Date().timeIntervalSince1970 + 86400 else { return nil }
+                      config.expiresAt <= Date().timeIntervalSince1970 + 86400 else {
+                    return nil
+                }
                 return config.expiresAt
             }
             directory.deleteLastPathComponent()
@@ -61,7 +65,9 @@ public enum MixedDiagnostics {
 #endif
 
     @MainActor public static func record(_ event: Event, _ fields: [Field: Value] = [:]) {
-        guard enabled, emitted < 10000 else { return }
+        guard enabled, emitted < 10000 else {
+            return
+        }
         emitted += 1
 #if canImport(os)
         if let message = encoded(event, fields) { logger.notice("\(message, privacy: .public)") }
@@ -71,8 +77,10 @@ public enum MixedDiagnostics {
     static func encoded(_ event: Event, _ fields: [Field: Value]) -> String? {
         struct Record: Encodable { let schema = 1; let event: String; let fields: [String: Value] }
         let record = Record(event: event.rawValue, fields: Dictionary(uniqueKeysWithValues: fields.map { ($0.key.rawValue, $0.value) }))
-        guard let data = try? JSONEncoder().encode(record) else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        guard let data = try? JSONEncoder().encode(record) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
     }
 
     public static func performanceFields(_ snapshot: MixedPerformance.Snapshot) -> [Field: Value] {
@@ -121,8 +129,12 @@ public enum MixedDiagnostics {
         }
     }
     public static func kind(_ event: KeyEventCore) -> Token {
-        if event.keyCode == 104 { return .kanaKey }
-        if event.keyCode == 102 { return .romanKey }
+        if event.keyCode == 104 {
+            return .kanaKey
+        }
+        if event.keyCode == 102 {
+            return .romanKey
+        }
         switch AutoMixedKeyRouter.input(event) {
         case .insert: return .insert
         case .enter: return .enter

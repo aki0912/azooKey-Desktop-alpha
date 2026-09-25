@@ -136,6 +136,8 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
     }
 
     @MainActor
+    // Keep the wire-command dispatch exhaustive and visible in one switch.
+    // swiftlint:disable:next cyclomatic_complexity
     private func handle(_ command: ConverterSessionCommand, sessionID: String) async throws -> ConverterServerResponse {
         let session = try getSession(sessionID)
         switch command {
@@ -188,7 +190,9 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
             attemptedMixedRuntime = true
             let enabled = AutoMixedExperiment.configuration(in: Self.appResourcesDirectoryURL()) != nil
             MixedDiagnostics.record(.runtimeStage, [.stage: .token(.marker), .experiment: .flag(enabled)])
-            guard enabled else { return nil }
+            guard enabled else {
+                return nil
+            }
             mixedRuntime = try? AutoMixedRuntime(resources: Self.appResourcesDirectoryURL(),
                 converter: kanaKanjiConverter, applicationDirectory: AppGroup.memoryDirectoryURL())
             MixedDiagnostics.record(.runtimeStage, [.stage: .token(.ready), .success: .flag(mixedRuntime != nil)])
@@ -391,8 +395,9 @@ if Array(CommandLine.arguments.dropFirst()) == ["--identity"] {
     let metadata = ["bundleIdentifier": identity.bundleIdentifier, "machServiceName": identity.machServiceName,
                     "preferencesIdentifier": identity.preferencesIdentifier, "keychainAccount": identity.keychainAccount,
                     "dataScope": identity == .mixed ? "isolated-local" : "standard-app-group"]
-    if let data = try? JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys]) {
-        print(String(decoding: data, as: UTF8.self))
+    if let data = try? JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys]),
+       let text = String(data: data, encoding: .utf8) {
+        print(text)
         exit(EXIT_SUCCESS)
     }
     exit(EXIT_FAILURE)

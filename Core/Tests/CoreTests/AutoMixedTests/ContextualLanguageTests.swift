@@ -27,6 +27,8 @@ private func input(_ raw: String, _ context: CommittedLeftContext = .unavailable
     LanguageJudgmentInput(raw: raw, leftCommittedContext: context, focusIdentity: UUID(), revision: 1)
 }
 
+// Mirror the external Python fixture schema without renaming its fields.
+// swiftlint:disable identifier_name
 private struct ContextGolden: Decodable {
     let feature_spec_version: String
     let kind: String
@@ -41,13 +43,13 @@ private struct ContextGolden: Decodable {
         let p_ja: Double
     }
 }
+// swiftlint:enable identifier_name
 
 private func checkContextGolden(_ file: URL, count: Int? = nil) throws {
     let reference = try JSONDecoder().decode(ContextGolden.self, from: Data(contentsOf: file))
     #expect(reference.feature_spec_version == ContextualCharacterFeatures.version)
     #expect(reference.kind == "fixture")
-    if let count { #expect(reference.vectors.count == count) }
-    else { #expect(reference.vectors.count >= 750) }
+    if let count { #expect(reference.vectors.count == count) } else { #expect(reference.vectors.count >= 750) }
     let model = try LogisticLanguageModel(testFixture: contextModelData())
     for vector in reference.vectors {
         let context = vector.left_context.map(CommittedLeftContext.available) ?? .unavailable
@@ -132,7 +134,10 @@ private func checkContextGolden(_ file: URL, count: Int? = nil) throws {
                                               ("minimum_path_margin", -1), ("unknown", 0)] {
             #expect(throws: (any Error).self) {
                 try LogisticLanguageModel(testFixture: contextModelData {
-                    var policy = $0["thresholds"] as! [String: Any]
+                    guard var policy = $0["thresholds"] as? [String: Any] else {
+                        Issue.record("Fixture thresholds must be an object")
+                        return
+                    }
                     policy[field] = value
                     $0["thresholds"] = policy
                 })

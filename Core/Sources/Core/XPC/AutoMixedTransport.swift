@@ -101,7 +101,9 @@ public struct AutoMixedClientLedger {
         capability?.serverEpoch == response.serverEpoch && focusID == response.focusID
     }
     public mutating func acceptSnapshot(_ response: AutoMixedResponse) -> Bool {
-        guard accepts(response), response.operationID >= lastSnapshotOperation else { return false }
+        guard accepts(response), response.operationID >= lastSnapshotOperation else {
+            return false
+        }
         lastSnapshotOperation = response.operationID
         acknowledgedRaw = response.raw
         pendingKeys.removeAll { $0.0 <= response.operationID }
@@ -129,7 +131,9 @@ public struct AutoMixedClientLedger {
         pendingKeys.isEmpty ? displayed : recoveryRaw()
     }
     public mutating func takeCommits(_ response: AutoMixedResponse) -> [AutoMixedCommitEffect] {
-        guard accepts(response) else { return [] }
+        guard accepts(response) else {
+            return []
+        }
         var effects: [AutoMixedCommitEffect] = []
         for effect in response.commits where appliedCommits.insert(effect.commitID).inserted {
             effects.append(effect)
@@ -142,7 +146,9 @@ public struct AutoMixedClientLedger {
 public enum AutoMixedKeyRouter {
     public static func input(_ event: KeyEventCore) -> MixedInputEvent? {
         guard !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control),
-              !event.modifierFlags.contains(.option) else { return nil }
+              !event.modifierFlags.contains(.option) else {
+            return nil
+        }
         switch event.keyCode {
         case 36, 76: return .enter
         case 48: return .tab(reverse: event.modifierFlags.contains(.shift))
@@ -152,14 +158,22 @@ public enum AutoMixedKeyRouter {
         default:
             guard let text = event.characters, !text.isEmpty,
                   text.unicodeScalars.allSatisfy({ $0.value >= 32 && !(0x7f...0x9f).contains($0.value)
-                      && !(0xf700...0xf8ff).contains($0.value) }) else { return nil }
+                      && !(0xf700...0xf8ff).contains($0.value) }) else {
+                return nil
+            }
             return .insert(text)
         }
     }
     public static func owns(_ event: KeyEventCore, composing: Bool, pending: Bool) -> Bool {
-        if event.modifierFlags.contains(.command) { return false }
-        if pending { return true }
-        guard let input = input(event) else { return composing }
+        if event.modifierFlags.contains(.command) {
+            return false
+        }
+        if pending {
+            return true
+        }
+        guard let input = input(event) else {
+            return composing
+        }
         switch input {
         case .insert, .space: return true
         default: return composing

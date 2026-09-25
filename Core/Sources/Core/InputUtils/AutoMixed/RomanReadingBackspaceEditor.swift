@@ -7,7 +7,9 @@ public struct RomanReadingBackspaceEditor: JapaneseBackspaceEditing {
 
     public func deletingLastUnit(in raw: String) -> JapaneseBackspaceEdit? {
         guard let parsed = RomanSpanReading.parse(raw), parsed.suffix.isEmpty,
-              !parsed.reading.isEmpty else { return nil }
+              !parsed.reading.isEmpty else {
+            return nil
+        }
         var remaining = parsed.reading
         let last = remaining.removeLast()
         // Small vowels and contracted sounds belong to the preceding full-sized kana.
@@ -16,14 +18,15 @@ public struct RomanReadingBackspaceEditor: JapaneseBackspaceEditing {
            !"ぁぃぅぇぉゃゅょゎっんー".contains(previous) {
             remaining.removeLast()
         }
-        if remaining.isEmpty { return .init(raw: "", reading: "") }
+        if remaining.isEmpty {
+            return .init(raw: "", reading: "")
+        }
         // Preserve the longest complete original spelling. Pending n/t cannot be kept
         // by merely truncating: encode the residual kana and verify the entire result.
         for count in stride(from: raw.count - 1, through: 0, by: -1) {
             let prefix = String(raw.prefix(count))
             let prefixReading: String
-            if prefix.isEmpty { prefixReading = "" }
-            else {
+            if prefix.isEmpty { prefixReading = "" } else {
                 guard let part = RomanSpanReading.parse(prefix), part.suffix.isEmpty else { continue }
                 prefixReading = part.reading
             }
@@ -39,13 +42,19 @@ public struct RomanReadingBackspaceEditor: JapaneseBackspaceEditing {
 
     private struct Rule: Sendable { let raw: String; let reading: String }
     private static let rules: [Rule] = {
-        guard let table = try? InputStyleManager.exportTable(.defaultRomanToKana) else { return [] }
+        guard let table = try? InputStyleManager.exportTable(.defaultRomanToKana) else {
+            return []
+        }
         return table.split(separator: "\n").compactMap { row in
             let columns = row.split(separator: "\t", omittingEmptySubsequences: false)
-            guard columns.count == 2, !columns[0].isEmpty, !columns[1].isEmpty else { return nil }
+            guard columns.count == 2, !columns[0].isEmpty, !columns[1].isEmpty else {
+                return nil
+            }
             let raw = String(columns[0]), reading = String(columns[1])
             guard let parsed = RomanSpanReading.parse(raw), parsed.suffix.isEmpty,
-                  parsed.reading == reading else { return nil }
+                  parsed.reading == reading else {
+                return nil
+            }
             return Rule(raw: raw, reading: reading)
         }
     }()

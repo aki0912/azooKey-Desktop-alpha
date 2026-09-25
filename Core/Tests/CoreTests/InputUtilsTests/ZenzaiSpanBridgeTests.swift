@@ -202,9 +202,13 @@ import Testing
                    "Requires the explicitly selected trained v2 artifact"))
     func trainedModelDrivesRealConversionAndRawRecovery() throws {
         let path = try #require(ProcessInfo.processInfo.environment["AUTO_MIXED_RUNTIME_MODEL"])
-        let model = try LogisticLanguageModel(data: Data(contentsOf: URL(fileURLWithPath: path)))
-        #expect(model.enterJapaneseThreshold == 0.9)
-        #expect(model.contextualThresholds?.enterWithoutContext == 0.98)
+        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+        let model = try LogisticLanguageModel(data: data)
+        let artifact = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let thresholds = try #require(artifact["thresholds"] as? [String: Double])
+        // The adapter must honor the selected export, not thresholds from an older run.
+        #expect(model.enterJapaneseThreshold == thresholds["enter_ja"])
+        #expect(model.contextualThresholds?.enterWithoutContext == thresholds["enter_ja_without_context"])
         let (bridge, _) = try bridge()
         defer { bridge.releaseAll() }
         let session = UUID()

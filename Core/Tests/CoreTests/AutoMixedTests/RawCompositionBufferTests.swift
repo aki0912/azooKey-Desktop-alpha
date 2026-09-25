@@ -3,6 +3,23 @@ import Foundation
 import Testing
 
 @Suite struct RawCompositionBufferTests {
+    @Test func editsRebuildOffsetsWithoutChangingEarlierSnapshotsOrCopies() throws {
+        var buffer = RawCompositionBuffer("a👩‍💻e\u{301}")
+        let snapshot = buffer.offsets
+        var copy = buffer
+        try buffer.deleteBackward()
+        try copy.moveCursor(toScalar: 1)
+        try copy.insert("漢")
+        #expect(snapshot.text == "a👩‍💻e\u{301}")
+        #expect(snapshot.graphemeBoundaries == [0, 1, 4, 6])
+        #expect(buffer.offsets.text == "a👩‍💻")
+        #expect(buffer.offsets.graphemeBoundaries == [0, 1, 4])
+        #expect(copy.offsets.text == "a漢👩‍💻e\u{301}")
+        #expect(copy.offsets.graphemeBoundaries == [0, 1, 2, 5, 7])
+        #expect(try snapshot.slice(ScalarRange(4, 6)) == "e\u{301}")
+        #expect(try buffer.offsets.slice(ScalarRange(1, 4)) == "👩‍💻")
+    }
+
     @Test func unicodeOffsetsAndIndicesRoundTrip() throws {
         let map = TextOffsetMap("Aかな漢👩‍💻e\u{301}")
         #expect(map.scalarCount == 9)

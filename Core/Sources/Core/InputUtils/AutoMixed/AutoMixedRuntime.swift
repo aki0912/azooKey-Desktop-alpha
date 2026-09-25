@@ -1,5 +1,5 @@
-import Foundation
 import Crypto
+import Foundation
 import KanaKanjiConverterModuleWithDefaultDictionary
 
 /// Bundle-only opt-in. Missing/invalid configuration leaves the normal IME manual.

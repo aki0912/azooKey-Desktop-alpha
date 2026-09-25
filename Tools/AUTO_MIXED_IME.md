@@ -13,7 +13,7 @@ python3 Tools/install_mixed_ime.py install
 python3 Tools/install_mixed_ime.py status
 ```
 
-2026-09-25の試用更新では、英単語抽出の境界修正とprefix重み候補を反映した。モデルSHA-256は `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22`。この版を再現するときは上記の `--model` を明示する（スクリプトの省略時指定は旧モデルのまま）。モデルの `release_ready=false` は維持しており、一般配布の品質合格ではない。更新後の実Mach XPC試験で句点後の「教えて」、meetingの入力途中、`asitanx → 明日nx`、apple、長音、確定・原文回復を確認した。実IMKの物理打鍵は今回未確認。
+2026-09-25の試用更新では、英単語抽出の境界修正とprefix重み候補を反映した。モデルSHA-256は `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22`。ビルド時は `--model` の指定が必須で、この版を再現するときは上記のモデルを使う。モデルの `release_ready=false` は維持しており、一般配布の品質合格ではない。更新後の実Mach XPC試験で句点後の「教えて」、meetingの入力途中、`asitanx → 明日nx`、apple、長音、確定・原文回復を確認した。実IMKの物理打鍵は今回未確認。
 
 導入済みの版を更新するときは、未確定文字を確定し、ABCやmacOS標準日本語などMixed以外へ切り替えてから次を実行する。`update` は入力ソースを再登録・再有効化せず、現在のモード設定を保つ。
 

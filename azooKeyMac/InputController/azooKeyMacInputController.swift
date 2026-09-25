@@ -50,7 +50,9 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     private var pinnedPromptsCache: [PromptHistoryItem] = []
 
     func appendDebugMessage(_ message: String) {
-        guard IMEIdentity.current != .mixed else { return }
+        guard IMEIdentity.current != .mixed else {
+            return
+        }
         NSLog("azooKeyMac: %@", message)
     }
 
@@ -202,7 +204,9 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     @MainActor
     override func commitComposition(_ sender: Any!) {
         MixedDiagnostics.record(.controllerCommit, [.owner: .id(converterServerClient.diagnosticID), .active: .flag(mixedInput.isActive)])
-        if mixedInput.finishImmediately(client: (sender as? IMKTextInput) ?? self.client(), keepMode: true) { return }
+        if mixedInput.finishImmediately(client: (sender as? IMKTextInput) ?? self.client(), keepMode: true) {
+            return
+        }
         let activationGeneration = self.activationGeneration
         self.converterServerClient.sendIfSessionOpen({ _ in .composition(.commit) }, completion: { [weak self] response in
             Task { @MainActor in
@@ -231,7 +235,9 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         }
 
         if let value = value as? NSString {
-            guard let mode = IMEInputMode.resolve(value as String, identity: .current) else { return }
+            guard let mode = IMEInputMode.resolve(value as String, identity: .current) else {
+                return
+            }
             if selectedInputMode != mode {
                 mixedInput.leaveForManual()
                 mixedInput.deactivate() // also invalidate an in-flight capability probe
@@ -279,9 +285,13 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
         logActivationGate()
         mixedInput.requestedPolicy = selectedInputMode.compositionPolicy
         guard selectedInputMode == .automatic, !mixedInput.isActive,
-              inputState == .none, pendingKeyEventCount == 0 else { return }
+              inputState == .none, pendingKeyEventCount == 0 else {
+            return
+        }
         mixedInput.activate(client: client) { [weak self] in
-            guard let self else { return false }
+            guard let self else {
+                return false
+            }
             self.logActivationGate()
             return self.selectedInputMode == .automatic && self.inputState == .none
                 && self.pendingKeyEventCount == 0 && self.inputLanguage == .japanese
@@ -290,7 +300,9 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
     }
 
     @MainActor private func logActivationGate() {
-        guard MixedDiagnostics.enabled else { return }
+        guard MixedDiagnostics.enabled else {
+            return
+        }
         MixedDiagnostics.record(.activationGate, [.owner: .id(converterServerClient.diagnosticID),
             .mode: .mode(selectedInputMode), .active: .flag(mixedInput.isActive), .empty: .flag(inputState == .none),
             .pending: .number(pendingKeyEventCount), .japanese: .flag(inputLanguage == .japanese),
@@ -486,7 +498,9 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     func requestPredictiveSuggestionWithConverterServer(client: IMKTextInput) -> Bool {
-        if mixedInput.isActive { return false }
+        if mixedInput.isActive {
+            return false
+        }
         return self.handleKeyEventWithConverterServer(
             event: KeyEventCore(
                 modifierFlags: [.control],
@@ -595,7 +609,9 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 
     @MainActor
     private func discardConverterServerComposition() {
-        if mixedInput.stop() { return }
+        if mixedInput.stop() {
+            return
+        }
         self.currentConverterView = nil
         self.converterServerClient.sendIfSessionOpen(
             { _ in .composition(.stopComposition) },
@@ -853,7 +869,9 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
 extension azooKeyMacInputController: CandidatesViewControllerDelegate {
     func candidateSubmitted() {
         Task { @MainActor in
-            if mixedInput.select(index: nil, adopt: true) { return }
+            if mixedInput.select(index: nil, adopt: true) {
+                return
+            }
             guard self.currentConverterView != nil else {
                 return
             }
@@ -873,7 +891,9 @@ extension azooKeyMacInputController: CandidatesViewControllerDelegate {
 
     func candidateSelectionChanged(_ row: Int) {
         Task { @MainActor in
-            if mixedInput.select(index: row, adopt: false) { return }
+            if mixedInput.select(index: row, adopt: false) {
+                return
+            }
             guard self.currentConverterView != nil else {
                 return
             }

@@ -11,7 +11,7 @@ import sys
 import time
 
 sys.dont_write_bytecode = True
-from prepare_auto_mixed_ime_build import prepare, sha256, RESOURCE_NAMES
+from prepare_auto_mixed_ime_build import prepare, sha256, validate_model_header, RESOURCE_NAMES
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build/auto-mixed"
@@ -96,6 +96,7 @@ def build(model, resources, diagnostics=False, configuration="Release"):
         raise ValueError("Expected Release or Debug configuration")
     swift_configuration = configuration.lower()
     model, resources = model.resolve(), resources.resolve()
+    validate_model_header(model)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     write_plist(OUTPUT / "Info.plist", profile_info())
     # No Developer ID / App Group provisioning is assumed for this local-only build.
@@ -143,7 +144,7 @@ def build(model, resources, diagnostics=False, configuration="Release"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", type=Path, default=BUILD / "independent-thresholds-refined-20260924/export/model.json")
+    parser.add_argument("--model", type=Path, required=True, help="Explicit trained v2 runtime export to package")
     parser.add_argument("--resources", type=Path, default=BUILD / "runtime-resources")
     parser.add_argument("--diagnostics", action="store_true", help="State-only unified logs for at most 24 hours / 10,000 events per process")
     parser.add_argument("--configuration", choices=["Release", "Debug"], default="Release",
