@@ -30,8 +30,9 @@ public enum IMEIdentity: String, Sendable {
         while directory.path != "/" {
             if directory.lastPathComponent == "Contents" {
                 let url = directory.appendingPathComponent("Info.plist")
+                // Empty options support both older macOS Int and newer OptionSet definitions.
                 if let data = try? Data(contentsOf: url),
-                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+                   let plist = try? PropertyListSerialization.propertyList(from: data, options: .init(), format: nil) as? [String: Any],
                    plist["CFBundleIdentifier"] as? String == Self.mixed.bundleIdentifier {
                     return .mixed
                 }
