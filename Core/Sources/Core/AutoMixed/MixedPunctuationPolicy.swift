@@ -13,7 +13,23 @@ public struct MixedPunctuationPolicy: Sendable {
         let source = TextOffsetMap(raw)
         let scalars = Array(raw.unicodeScalars)
         let context = Array((leftContext.text ?? "").unicodeScalars)
-        let protected = ProtectedSpanDetector.detect((leftContext.text ?? "") + raw).verbatimScalars
+        func protections(_ text: String, offset: Int) -> [Bool] {
+            ProtectedSpanDetector.detect(text) { stem in
+                // Do not re-protect a bare dotted token already disambiguated as Japanese
+                // by the runtime segmenter. Explicit structured tokens still win upstream.
+                guard stem.lowerBound >= offset else { return true }
+                let lower = stem.lowerBound - offset, upper = stem.upperBound - offset
+                let covered = spans.reduce(0) { count, span in
+                    guard span.kind == .japaneseRoman || span.kind == .japaneseKana else { return count }
+                    return count + max(0, min(upper, span.sourceRange.upperBound) - max(lower, span.sourceRange.lowerBound))
+                }
+                return covered != stem.count
+            }.verbatimScalars
+        }
+        let localProtected = protections(raw, offset: 0)
+        // A committed Japanese sentence must not hide a new filename's structure;
+        // conversely a URL continued from committed context must remain protected.
+        let protected = context.isEmpty ? localProtected : protections((leftContext.text ?? "") + raw, offset: context.count)
         var english = context.last.map(Self.isLetter) ?? false
         var previous = context.last
         var brackets: [Unicode.Scalar] = []
@@ -30,7 +46,7 @@ public struct MixedPunctuationPolicy: Sendable {
                 var display = scalar
                 if span.kind == .literal, let replacement = Self.japanese(scalar),
                    source.isGraphemeBoundary(index), source.isGraphemeBoundary(index + 1),
-                   !protected[context.count + index] {
+                   !protected[context.count + index], !localProtected[index] {
                     // Retain decimals, dates, grouped numbers, negative numbers and indices,
                     // including their incomplete prefixes while the next key is pending.
                     let numeric = previous.map(Self.isDigit) == true || next.map(Self.isDigit) == true

@@ -64,6 +64,123 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test func installedHelperDeletesReadingUnitsAndResumesConversion() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-reading-backspace-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        var focus = UUID(), operation: UInt64 = 0
+        var startsFocus = true
+        func send(_ action: AutoMixedAction) async throws -> ConverterServerResponse {
+            operation += 1
+            let request = AutoMixedRequest(serverEpoch: capability.serverEpoch, focusID: focus,
+                operationID: operation, startsFocus: startsFocus, context: .init(leftSideContext: ""), action: action)
+            startsFocus = false
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(request)))
+        }
+        func key(_ text: String, code: UInt16 = 0) async throws -> ConverterServerResponse {
+            try await send(.key(.init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: code)))
+        }
+        func display(_ response: ConverterServerResponse) -> String {
+            response.snapshot.markedText.elements.map(\.content).joined()
+        }
+        func commit(_ expected: String) async throws {
+            let result = try await send(.commit)
+            if expected.isEmpty { #expect(result.autoMixed?.commits.isEmpty == true) }
+            else {
+                let effect = try #require(result.autoMixed?.commits.first)
+                #expect(effect.text == expected)
+                let ack = try await send(.commitApplied(effect.commitID))
+                #expect(ack.autoMixed?.raw.isEmpty == true)
+                #expect(ack.autoMixed?.commits.isEmpty == true)
+            }
+        }
+        for (raw, expected) in [("asita", "あし"), ("ashita", "あし"), ("kitte", "きっ"), ("kanji", "かん"),
+                                ("kya", ""), ("sha", ""), ("fa", ""), ("harike-n", "はりけー"),
+                                ("apple asita", "apple あし")] {
+            for character in raw { _ = try await key(String(character)) }
+            let deleted = try await key("\u{7f}", code: 51)
+            #expect(deleted.autoMixed?.status == .ready)
+            #expect(display(deleted) == expected, "authored: \(raw)")
+            try await commit(expected)
+        }
+        _ = try await key("asita")
+        #expect(display(try await key("\u{7f}", code: 51)) == "あし")
+        #expect(display(try await key("\u{7f}", code: 51)) == "あ")
+        #expect(display(try await key("sita")) == "明日")
+        _ = try await key("\u{7f}", code: 51)
+        let selection = try await key("\t", code: 48)
+        let revision = try #require(selection.autoMixed?.revision)
+        guard case .selecting(let candidates, _) = selection.snapshot.candidateWindow else {
+            Issue.record("Reading preview must reopen conversion candidates"); try await probe.close(session); return
+        }
+        let index = try #require(candidates.firstIndex { $0.text == "足" })
+        _ = try await send(.selectCandidate(index: index, revision: revision, adopt: true))
+        #expect(display(try await key("\u{7f}", code: 51)) == "あ")
+        #expect(try await send(.selectCandidate(index: index, revision: revision, adopt: true)).autoMixed?.status == .staleRequest)
+        try await commit("あ")
+        _ = try await key("asitanx")
+        for expected in ["明日n", "明日", "あし"] {
+            #expect(display(try await key("\u{7f}", code: 51)) == expected)
+        }
+        #expect(display(try await key("\u{1b}", code: 53)) == "asi")
+        #expect(display(try await key("\u{7f}", code: 51)) == "as")
+        try await commit("as")
+        _ = try await key("asita")
+        _ = try await key("\u{7f}", code: 51)
+        _ = try await send(.deactivate)
+        focus = UUID(); startsFocus = true
+        #expect(display(try await key("asita")) == "明日")
+        try await commit("明日")
+        try await probe.close(session)
+    }
+
+    @Test func installedHelperKeepsJapaneseWhenTypingAfterPunctuation() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-punctuation-continuation-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction, left: String?) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, context: .init(leftSideContext: left), action: action))))
+        }
+        func type(_ text: String, left: String?) async throws -> String {
+            var display = ""
+            for character in text {
+                let response = try await send(.key(.init(modifierFlags: [], characters: String(character),
+                    charactersIgnoringModifiers: String(character), keyCode: 0)), left: left)
+                #expect(response.autoMixed?.status == .ready)
+                display = response.snapshot.markedText.elements.map(\.content).joined()
+            }
+            return display
+        }
+        let contexts: [String?] = [nil, "", "今日は晴れです。"]
+        for left in contexts {
+            for stem in ["asita", "asitanotennkiwosirabetehosii"] {
+                for (punctuation, rendered) in [(".", "。"), (",", "、")] {
+                    let before = try await type(stem, left: left)
+                    #expect(before != stem)
+                    #expect(try await type(punctuation, left: left) == before + rendered)
+                    #expect(try await type("d", left: left) == before + rendered + "d")
+                    let removed = try await send(.key(.init(modifierFlags: [], characters: "\u{7f}",
+                        charactersIgnoringModifiers: "\u{7f}", keyCode: 51)), left: left)
+                    #expect(removed.snapshot.markedText.elements.map(\.content).joined() == before + rendered)
+                    #expect(try await type("d", left: left) == before + rendered + "d")
+                    let commit = try #require(try await send(.commit, left: left).autoMixed?.commits.first)
+                    #expect(commit.text == before + rendered + "d")
+                    let ack = try await send(.commitApplied(commit.commitID), left: left)
+                    #expect(ack.autoMixed?.raw.isEmpty == true)
+                    #expect(ack.autoMixed?.commits.isEmpty == true)
+                }
+            }
+        }
+        try await probe.close(session)
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_STRESS"] == "1"))
     func installedHelperAcknowledgesThousandCompositions() async throws {
         let probe = MixedIMEProbe()

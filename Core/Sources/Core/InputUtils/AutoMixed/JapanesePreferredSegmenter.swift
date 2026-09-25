@@ -30,7 +30,29 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
     public func segment(_ raw: String) throws -> [MixedSpan] {
         let source = TextOffsetMap(raw)
         guard source.scalarCount <= 4096 else { reset(); throw AutoMixedError.invalidRange }
-        let evidence = try baseline.evidence(raw)
+        let protectionForDisplay = ProtectedSpanDetector.detect(raw) { stem in
+            // A dot plus one pending letter must not turn an entire Japanese sentence
+            // into a filename. Re-evaluate current spelling, never trust previous display.
+            guard let range = try? ScalarRange(stem.lowerBound, stem.upperBound),
+                  let word = try? source.slice(range), lexicon.exactLevel(word) == nil,
+                  let reading = RomanSpanReading.parse(word), !reading.prefix.isEmpty, reading.suffix.isEmpty,
+                  let prefix = try? source.slice(ScalarRange(0, stem.upperBound)),
+                  let independent = try? baseline.evidence(prefix),
+                  independent.protection.scalars[stem].allSatisfy({ $0 == .inferred }) else { return true }
+            let ps = independent.probabilities[stem]
+            if ps.reduce(0, +) / Double(ps.count) >= model.holdJapaneseThreshold { return false }
+            guard context.isAvailable else { return true }
+            // Context may suppress even the kana preview's spelling evidence. Use the
+            // same hold gate on a separate context-free control, not a lower threshold.
+            let mean = try? MixedPerformance.measure(.classification) {
+                MixedPerformance.count(.scorePass)
+                let features = ContextualCharacterFeatures(prefix, leftContext: .unavailable)
+                return try stem.reduce(0.0) { try $0 + model.score(features, at: $1).japaneseProbability }
+                    / Double(stem.count)
+            }
+            return mean.map { $0 < model.holdJapaneseThreshold } ?? true
+        }
+        let evidence = try baseline.evidence(raw, protection: protectionForDisplay)
         let protected = evidence.protection
         let protection = protected.scalars
         let prior = try baseline.segment(raw, evidence: evidence)

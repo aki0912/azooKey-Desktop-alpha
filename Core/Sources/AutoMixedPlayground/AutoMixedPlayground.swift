@@ -90,7 +90,8 @@ private final class PlaygroundState: ObservableObject {
             converter: MixedSessionConverter(bridge: bridge, sessionID: focus,
                                              leftContext: useContext ? String(committed.suffix(30)) : nil,
                                              allowJapaneseReadingFallback: true),
-            punctuation: MixedPunctuationPolicy(leftContext: context)
+            punctuation: MixedPunctuationPolicy(leftContext: context),
+            backspaceEditor: RomanReadingBackspaceEditor()
         )
     }
 
@@ -122,6 +123,7 @@ private final class PlaygroundState: ObservableObject {
                 // The transcript is in-memory only. Playground commits never train the converter.
                 try resetEngine()
             }
+            raw = engine?.buffer.text ?? raw
             try refresh()
         } catch { self.error = "操作できませんでした。原文は入力欄に残っています。" }
     }
@@ -198,6 +200,7 @@ private struct PlaygroundView: View {
                     .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
                     .accessibilityIdentifier("mixed-preview").id(state.display)
                 HStack {
+                    Button("読みを削除") { state.event(.backspace) }.disabled(state.raw.isEmpty)
                     Button("候補 / 次へ") { state.event(.tab()) }.disabled(state.raw.isEmpty)
                     Button("前の候補") { state.event(.tab(reverse: true)) }.disabled(state.selection.isEmpty)
                     Button(state.selection.isEmpty ? "確定" : "候補を採用") { state.event(.enter) }.disabled(state.raw.isEmpty)

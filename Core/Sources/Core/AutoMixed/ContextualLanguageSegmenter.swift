@@ -18,11 +18,11 @@ public struct ContextualLanguageSegmenter: ContextualLanguageJudging, Sendable {
         let probabilities: [Double]
     }
 
-    func evidence(_ input: LanguageJudgmentInput) throws -> Evidence {
+    func evidence(_ input: LanguageJudgmentInput, protection supplied: ProtectedText? = nil) throws -> Evidence {
         try MixedPerformance.measure(.classification) {
             MixedPerformance.count(.scorePass)
             let features = ContextualCharacterFeatures(input.raw, leftContext: input.leftCommittedContext)
-            let protection = ProtectedSpanDetector.detect(input.raw)
+            let protection = supplied ?? ProtectedSpanDetector.detect(input.raw)
             let probabilities = try protection.scalars.enumerated().map { index, policy in
                 policy == .inferred ? try model.score(features, at: index).japaneseProbability : 0.5
             }

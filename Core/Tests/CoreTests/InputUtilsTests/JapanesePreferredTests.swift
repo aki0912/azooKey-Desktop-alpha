@@ -52,6 +52,23 @@ import Testing
         }
     }
 
+    @Test func bareDottedJapaneseNeedsReadingAndEvidenceWhileExplicitStructuresStayProtected() throws {
+        let preferred = try segmenter(fixture())
+        let weak = try segmenter(fixture(0.1))
+        for raw in ["asita.d", "nihongo.txt", "asita.desu"] {
+            let spans = try preferred.segment(raw)
+            #expect(spans.first?.kind == .japaneseRoman)
+            #expect(try weak.segment(raw).allSatisfy { $0.kind == .literal })
+            // The frozen judge and public detector keep the original protection contract.
+            #expect(ProtectedSpanDetector.detect(raw).scalars.allSatisfy { $0 == .literal })
+            #expect(try TrainedMixedSegmenter(model: fixture(), focus: UUID()).segment(raw).allSatisfy { $0.kind == .literal })
+        }
+        for raw in ["note.txt", "name.md", "made.d", "readme.mdwohiraku", "qzx.d", "asitan.d",
+                    "./asita.d", "https://asita.d", "www.asita.d", "asita@example.com", "asita_d.txt", "v3.2"] {
+            #expect(try preferred.segment(raw).allSatisfy { $0.kind == .literal }, "protected: \(raw)")
+        }
+    }
+
     @Test func japaneseDefaultRequiresRomanValidityNotAnEnglishSubstringScan() throws {
         let model = try fixture()
         let preferred = try segmenter(model)

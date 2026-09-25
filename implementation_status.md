@@ -1691,3 +1691,78 @@ ABC選択中を確認する専用updateで旧Mixedへ戻し、同じ実XPC記号
 - 試験文字を消し、空の書類を一時フォルダに `mixed-ime-ui-check-empty.rtf` として保存して閉じた。保存後のUI取得は `noWindowsAvailable` を返し、空書類の保存ファイルを確認した。入力ソースは試験前の標準日本語へ復帰済み。登録、有効状態、モデル、診断設定、導入アプリやコードには変更なし。
 
 Macのロックという前回の制約は解消したが、今回は自動キー送信の制約で実入力確認に至らなかった。次の実アプリ確認には物理キー入力、または通常のIME経路を通ると検証済みのキー送信手段が必要。
+
+## 句点の後の英字追加で日本語文が全英字になる問題（2026-09-25）
+
+開始HEADは `67eec43`（`Optimize mixed input scoring and trace performance`）、ブランチは `codex/mixed-prefix-regressions`、working treeはclean。利用者の `asitanotennkiwosirabetehosii.d` を、同じモデル・辞書・固定依存で1文字ずつ再生した。ログは `build/auto-mixed/punctuation-continuation-20260925/`。実際のアプリの本文や確定文脈は採取せず、利用者提示の固定例と自作fixtureのみを使用した。
+
+### 原因と修正
+
+- `ProtectedSpanDetector` の裸のファイル名規則が `英数字.英字…` 全体に一致し、最後のdで日本語文までliteralへ変更していた。変換器の失敗によるraw fallbackではなく、変換前の保護判定。通常辞書・実Zenzaiの両方で再現し、同じ位置の `,`／`。`／`、` では再現しなかった。
+- Mixedの `JapanesePreferredSegmenter` に限り、ドット前が未完部分なしのローマ字、英単語辞書の完全一致なし、既存hold閾値以上の日本語根拠ありの場合は、裸のファイル名保護を適用しない。現在のprefixを同じモデル・文脈で評価し、不十分なときだけ文脈なし対照にも同じ閾値を要求する。前回表示や特定の語・拡張子を固定しない。貼り付けでも同じ判定になる。
+- 保護を解いた後の判定には元の文脈を使用する。文脈付きモデルの根拠が弱い場合は、従来のかな表示を維持し、漢字を無条件採用しない。URL・メール・明示的パス・識別子・バージョンは先に保護する。publicの既定検出とT0〜T2/T3の凍結判定は変更せず、モデル、特徴量、係数、閾値、schema、XPC、manualも変更しない。
+- `MixedPunctuationPolicy` は、日本語spanがドット前を全て覆う場合、その裸のファイル名保護を再適用しない。また、確定済み日本語を連結すると `main.swift` 等の保護が消えてドットが句点になる別の問題が判明した。現在rawの保護と確定文脈を連結した保護の両方を維持して修正し、確定済みURLの続きも引き続き保護する。
+- 設計差分と影響は `docs/azookey_auto_mixed_codex/docs/03_ARCHITECTURE.md` §11.4に記載。`nihongo.txt` のように日本語の根拠が強い裸のファイル名は、日本語文として表示される可能性がある。明示的パスやEscape原文確定は維持する。この曖昧性を解消した、一般的なファイル名識別精度を改善した、とは主張しない。
+
+### 検証・失敗と再検証
+
+- 修正前の新規2試験は36 assertion失敗、7.548秒（`before.log`）。短い `asita.d` と利用者の文を、文脈取得不可／空／自作日本語文脈で比較した。失敗はASCIIドットにdを続けた表示・確定・貼り付けに限定され、commaと全角句読点は成功。
+- 最初の修正後は12 assertion失敗、7.548秒（`after-first.log`）。自作日本語文脈でモデルが低スコアになり、かなで表示していた文まで再びファイル名になっていた。辞書のみの切り分けも6 assertion失敗、3.680秒（`diagnose.log`）。文脈なし対照に同じhold閾値を要求する修正で対応し、期待値や閾値は弱めていない。
+- 続きの `desu`／`apple` と保護すべきファイル名を増やした試験は、上記の確定文脈とファイル名の記号表示問題で32 assertion失敗、17.309秒（`after-expanded.log`）。raw単独の保護を併用して修正した。
+- 最終関連Core試験はrunner52件中51件成功・1件skip、9 suite、24.276秒（`core-final.log`）。skipはopt-inの1,000回stressで今回は未指定。文脈3条件、2つの文、4種類の句読点、末尾d、削除・再入力、desu／appleの継続、貼り付け、表示確定、Escape原文確定を通常辞書・実Zenzaiで検証。実Zenzaiはbackend readyを要求した。利用者例の最終表示は両backendとも **「明日の天気を調べてほしい。d」**。学習はOFF。既存apple・meeting・asitanx・不成立ローマ字・長音・候補失効・session解放・記号・構造保護の関連回帰も成功。
+- 最終pure/golden/Python/export parityは45件・10 suite、skipなし、0.163秒（`parity-current-exports.log`）。v1/v2の既定保護、特徴量・LR・Viterbi、fixtureと導入対象exportの数値を照合した。最初のsandbox実行はdSYM生成がOperation not permittedで失敗（`parity.log`）。ホスト側nativeビルドへの再実行では、指定した古いfixture exportにsegment_casesがなく1件失敗（`parity-final.log`）。既に存在する現行形式のfixture-smoke exportを指定して成功した。学習し直したり検証項目を外したりしていない。
+
+モデルSHAは従来どおり `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22`。macOS 27 arm64／Xcode 27／Swift 6.4。SwiftPM native非推奨と依存llamaのdeployment target警告あり。SwiftLintは未導入で未実行。今回追加の判定処理の性能測定、1,000回stress、修正版の実Mach XPC、物理キーによる実アプリ検証は未実施。
+
+コードと回帰試験は修正済み、差分は未コミット。今回の依頼は挙動調査のため、導入済みIMEの更新・停止・登録・設定変更は行っておらず、**使用中のMixedには今回の修正は未反映**。次はMixed専用Releaseビルドと安全な更新、導入済み実XPCでの同じ逐次入力、物理打鍵での確認。
+
+### 利用者依頼によるMixed反映（2026-09-25）
+
+続く「IMEに反映して」の依頼を受け、上記の修正をMixed専用Releaseへ反映した。前段の「未反映」はこの更新で解消。ログ・復旧用旧アプリは同じ `build/auto-mixed/punctuation-continuation-20260925/` に保存した。
+
+- IMEと同梱helperのReleaseビルド、資源検証、署名検証が成功（`build.log`）。モデルSHAは引き続き `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22`。再学習・辞書変更なし。更新手順の模擬OS試験13件成功、0.058秒（`installer-tests.log`）。
+- `MixedIMEInstalledTests` に、利用者例と `asita` を3つの固定文脈で逐次入力し、`.`／`,`、末尾d、削除・再入力、表示確定、ack後の空状態を確認する実XPC回帰試験を追加。更新前の導入済みhelperでは1件・18 assertion失敗、1.914秒で問題を再現（`installed-before.log`）。候補順位を固定せず、句読点を打つ直前の日本語表示が保持されることを要求する試験で、既存の期待値は変更していない。
+- 入力ソースがmacOS標準日本語であることを確認し、旧Mixedを `previous-azooKeyMixed.app` に保存。Mixed専用 `update --dry-run` と `update` が成功（`update-dry-run.log`／`update.log`）。入力ソースの再登録・再有効化、通常版の変更、利用者の入力欄の操作は行っていない。
+- **更新済み実Mach XPC試験7件成功、skipなし、23.350秒**（`installed-final.log`）。新規の句読点後の継続試験は4.479秒で成功。既存のapple・記号・長音・不成立ローマ字・確定重複排除も成功。1,000回の入力・確定・ackと定期的なフォーカス更新の試験も23.350秒で成功した。Mixed専用の隔離sessionと固定試験データを使い、実アプリの本文や入力履歴は収集していない。
+- ビルド先と導入先のapp/helper/モデル/自動・manualアイコンSHA一致を確認（`hashes-before.json`／`hashes-after.json`）。app SHAは `e8a1673971c29400720fa7d0dde7ef3b5efaa11cab56dddcdb2487cddd44fa3f`、helperは `54aae07b8efda7098f378e7bac182fec41964c606240e0a1c5a7c9ef446384d9`。導入先のdeep strict署名検証成功。モデル・アイコンは更新前と同一、Release、診断OFF。
+- 更新前後のMixedモード状態JSONは一致。選択中ソースは引き続き `com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese`。自動モードへ利用者が切り替えれば修正版を使用できる。
+
+実IMKの物理打鍵と追加判定の性能測定は今回も未実行で、実XPC試験とは区別する。更新後の失敗なし。差分空白検査成功。差分は未コミット。
+
+
+## MixedのBackspaceを読み単位で削除（2026-09-25）
+
+開始HEADは `67eec43`、ブランチは `codex/mixed-prefix-regressions`。開始時には上記の句読点継続修正と反映記録が未コミットで存在し、それらを保持して追加した。依存は `ad714fea8cb2fe113aea86ba5c42563cdaf77cfb` のまま。ログ・旧Mixedの復旧用コピーは `build/auto-mixed/reading-backspace-20260925/`。
+
+### 実装と仕様差分
+
+- 新設 `JapaneseBackspaceEditing`／`JapaneseBackspaceEdit` を `MixedCompositionEngine` に任意注入する。既定nilは従来の原文1書記素削除。Mixed runtimeと試用アプリに新設 `RomanReadingBackspaceEditor` を注入した。試用アプリには「読みを削除」ボタンを追加し、編集後rawを入力欄へ同期する。通常版・manualの経路、モデル、閾値、XPC schemaは変更していない。
+- 既存 `RomanSpanReading` が実際の依存 `ComposingText` を使って得る読みから削除する。小書きかなは直前の通常かなとまとめ、`っ・ん・ー` は独立単位とする。`nki` 等の依存内部segment境界を削除境界に流用しない。未完英字は先に1書記素ずつ削除し、`明日nx → 明日n → 明日 → あし` を維持する。
+- 原文prefixを最長で保持し、切り詰めだけでは目的の読みにならない場合だけ、実際の公開API `InputStyleManager.exportTable(.defaultRomanToKana)` の規則を逆引きする。候補は短い綴り、同長なら辞書順で選び、再解析で読みが完全一致することを要求する。独自ローマ字表は追加していない。新設APIと依存APIは区別している。
+- 編集した日本語区間だけをかな表示にし、採用候補・converter child・古い候補トークンを失効させる。他の区間を保持し、連続削除ではかな表示を維持する。文字・記号・空白・Tabで再変換、Enterで表示中のかなを確定。確定・取消・フォーカス終了で編集状態を解放する。
+- 原文は編集後の入力を表す。`きって → きっ`／`かんじ → かん` で綴りを組み直した場合、Escapeはその編集後rawを表示する。Escape原文表示中は1書記素削除後も原文表示を維持する。この承認済み操作仕様と影響を設計書§11.5と `Tools/AUTO_MIXED_IME.md` に記載した。
+- 通信失敗時の未応答操作は従来の原文保全契約を維持する。`asita` の削除応答を受け取る前は回復rawが `asit`、応答確認後は `asi` となることを別々に検証。未応答Backspaceまで読み単位で再現できるとは扱わない。中央編集は今回対象外。
+
+### 検証と失敗
+
+- 新規ReadingBackspace試験は6件。通常辞書・実Zenzaiを分けて実行し、実Zenzaiはbackend readyを要求した。`asita/ashita`、`si/shi`、`tu/tsu`、拗音、促音、撥音、長音、未完子音、英語混在、Unicode書記素、連続削除、再入力、かな確定、Tab、Escape、候補採用後削除、フォーカス終了、失敗時raw保全を確認。`kitte`／`kanji` の残った `っ`／`ん` の再削除、空白・句点で再変換を追加した最終再実行も **6件成功、skipなし、1.869秒**（`reading-final.log`）。
+- 関連Core回帰 **65件・10 suite成功、skipなし、75.171秒**（`core-final.log`）。句読点後の継続入力、apple、meeting、asitanx、不成立ローマ字、記号・長音、候補失効、session再利用・解放、実Zenzaiの1,000回入力・確定、transportを含む。これは物理打鍵・長時間RSS測定ではない。
+- golden／Python／export parity **45件・10 suite成功、skipなし、0.172秒**（`parity.log`）。v1/v2の特徴量・LR・Viterbi、Unicode範囲、既定保護、fixtureと承認済みexportのactiveIndices・数値を維持。誤差1e-12未満を要求し、モデルの再学習や期待値の緩和はしていない。既存呼出しは既定nilなので、従来Backspace試験の期待値も変更していない。
+- IMKクライアントの模擬欄／transportは11件成功、0.005秒（`client.log`）。インストーラーの模擬OS試験は13件成功、0.063秒（`installer-tests.log`）。
+- 初回の新規試験コンパイルで、Swift Testingの `#expect` 内からmutating ledger関数を呼ぶとmacro展開のreceiverがimmutableとなるエラーが発生（`first.log`）。呼出し結果をローカルBoolへ保存してからassertする修正で解消。実装の動作や期待値を弱めていない。
+- 更新前の旧インストール済みhelperに新規実XPC試験を実行し、24 assertion失敗、0.681秒で従来のraw1文字削除を検出した（`installed-before.log`）。これは旧版に新仕様を要求した想定した失敗であり、修正版の成功とは分ける。
+
+### Mixed専用Releaseへの反映
+
+利用者が依頼した計画に従い、Core検証成功後にIME・同梱helperをReleaseビルドした（`build.log`）。入力ソースABCを確認して旧Mixedを保存し、専用 `update --dry-run`／`update` で反映（`update-dry-run.log`／`update.log`）。登録・有効状態の変更、通常版への変更、利用者の入力欄の操作は行っていない。
+
+- **更新済み実Mach XPC試験8件成功、skipなし、22.466秒**（`installed-final.log`）。新規の読み削除試験は3.183秒で成功。連続削除、再入力、かな確定、Tab再変換、候補採用後削除、古いrevisionの拒否、Escape原文削除、フォーカス更新を確認。既存のapple、句読点継続、長音、不成立ローマ字、確定重複排除と1,000回入力・確定・ackも成功。固定fixtureを使う隔離sessionで、実際の利用者の本文・確定文脈は収集していない。
+- ビルド先と導入先のapp/helper/モデル/3アイコンSHAが一致。モデル・アイコンは更新前と同一（`hashes-before.json`／`hashes-after.json`）。app SHAは `bb33855d3089a98880753c45eb40bd4bf7876f331c189c1cf96b39f303697cef`、helper SHAは `070af826eed4214b2606c7c8c0ef8db61eff602300ae006c413d4d78ae5e95d9`。deep strict署名検証成功。IME/helperともRelease、診断OFF。
+- モデルSHAは `471a88a65739d72386d57fef1531c0a3aa0a031f9c4a709a0fcb4eca728baa22`、schema 2／anchored-context-v2のまま。辞書・Zenzai資源を変更していない。既存モデルの品質承認状態も変更せず、曖昧語性能改善の主張はしない。
+- 更新前後のMixedモード状態JSONは一致し、選択中ソースは引き続きABC。Mixed自動を選べば修正版を使用できる。旧Mixedの復旧用コピーを保持した。
+
+### 未確認事項と次の状態
+
+macOS 27 arm64／Xcode 27／Swift 6.4で実行。SwiftPM native非推奨・依存deployment target等の既存警告は残る。SwiftLintは未導入で未実行。試用アプリはビルドしたが、追加ボタンのGUI操作は未実行。実アプリでの物理打鍵、secure field、長時間利用・RSS、新規削除処理の性能測定も未実行。先行のTextEdit対照試験で自動文字キー送信を通常IME入力と同等に扱えなかったため、実XPCの成功で物理打鍵成功とはしない。
+
+実装・通常辞書・実Zenzai・実XPCの検証とMixed更新は完了。次はMixed自動での物理打鍵による「asita → Backspace → Backspace」、促音・撥音を残す削除と再入力の確認。差分は未コミットで、先行の句読点継続修正を保持している。

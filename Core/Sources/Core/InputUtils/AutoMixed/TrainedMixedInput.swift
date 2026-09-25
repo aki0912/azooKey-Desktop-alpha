@@ -18,8 +18,8 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
         try segment(raw, evidence: evidence(raw))
     }
 
-    func evidence(_ raw: String) throws -> ContextualLanguageSegmenter.Evidence {
-        try judge.evidence(input(raw))
+    func evidence(_ raw: String, protection: ProtectedText? = nil) throws -> ContextualLanguageSegmenter.Evidence {
+        try judge.evidence(input(raw), protection: protection)
     }
 
     private func input(_ raw: String) -> LanguageJudgmentInput {

@@ -15,16 +15,20 @@ import Foundation
     private let segmenter: any LanguageSegmenter
     private let converter: any JapaneseSpanConverting
     private let punctuation: MixedPunctuationPolicy?
+    private let backspaceEditor: (any JapaneseBackspaceEditing)?
+    private var readingPreview: (id: UUID, text: String)?
     private var candidates: [UUID: [MixedCandidate]] = [:]
     private var accepted: [UUID: MixedCandidate] = [:]
     private var selectingSpanID: UUID?
     private var selectionFromRawPreview = false
 
     public init(segmenter: any LanguageSegmenter, converter: any JapaneseSpanConverting,
-                punctuation: MixedPunctuationPolicy? = nil) {
+                punctuation: MixedPunctuationPolicy? = nil,
+                backspaceEditor: (any JapaneseBackspaceEditing)? = nil) {
         self.segmenter = segmenter
         self.converter = converter
         self.punctuation = punctuation
+        self.backspaceEditor = backspaceEditor
     }
 
     /// Whole raw-field edits for the isolated playground; no IMK cursor mapping is implied.
@@ -37,6 +41,7 @@ import Foundation
     }
 
     public func cancel() {
+        readingPreview = nil
         segmenter.reset()
         converter.finishComposition()
         buffer = RawCompositionBuffer()
@@ -82,14 +87,16 @@ import Foundation
         case .space:
             try edit { try $0.insert(" ") }
         case .backspace:
-            try edit { _ = try $0.deleteBackward() }
+            try deleteBackward()
         case .tab(let reverse):
+            if readingPreview != nil { try edit { _ in } }
             try selectCandidate(reverse: reverse)
         case .escape:
             if state == .selecting {
                 state = selectionFromRawPreview ? .rawPreview : .composing
                 closeSelection()
             } else {
+                readingPreview = nil
                 state = .rawPreview
             }
         case .enter:
@@ -109,6 +116,7 @@ import Foundation
                 spans = []
                 candidates = [:]
                 accepted = [:]
+                readingPreview = nil
                 closeSelection()
                 usedRawFallback = false
                 state = .idle
@@ -148,13 +156,35 @@ import Foundation
         state = .selecting
     }
 
-    private func edit(_ operation: (inout RawCompositionBuffer) throws -> Void) throws {
+    private func deleteBackward() throws {
+        let rawPreview = state == .rawPreview || selectionFromRawPreview
+        if !rawPreview, !usedRawFallback, buffer.cursorScalarOffset == buffer.offsets.scalarCount,
+           let last = spans.last, last.kind == .japaneseRoman || last.kind == .japaneseKana,
+           let replacement = backspaceEditor?.deletingLastUnit(in: try buffer.offsets.slice(last.sourceRange)) {
+            var retained = Array(spans.dropLast())
+            readingPreview = nil
+            if !replacement.raw.isEmpty {
+                let span = try MixedSpan(sourceRange: ScalarRange(last.sourceRange.lowerBound,
+                    last.sourceRange.lowerBound + replacement.raw.unicodeScalars.count), kind: .japaneseKana)
+                retained.append(span)
+                readingPreview = (span.id, replacement.reading)
+            }
+            try edit(preservingSpans: retained) { try $0.replace(last.sourceRange, with: replacement.raw) }
+        } else {
+            try edit { _ = try $0.deleteBackward() }
+            if backspaceEditor != nil, rawPreview, !buffer.isEmpty { state = .rawPreview }
+        }
+    }
+
+    private func edit(preservingSpans: [MixedSpan]? = nil, _ operation: (inout RawCompositionBuffer) throws -> Void) throws {
+        if preservingSpans == nil { readingPreview = nil }
         let oldBuffer = buffer
         let oldSpans = spans
         try operation(&buffer)
         closeSelection()
         usedRawFallback = false
         if buffer.isEmpty {
+            readingPreview = nil
             segmenter.reset()
             converter.finishComposition()
             spans = []
@@ -164,7 +194,7 @@ import Foundation
             return
         }
         do {
-            let proposed = try MixedPerformance.measure(.judgment) { try segmenter.segment(buffer.text) }
+            let proposed = try preservingSpans ?? MixedPerformance.measure(.judgment) { try segmenter.segment(buffer.text) }
             try MixedMarkedTextRenderer.validate(spans: proposed, source: buffer.offsets)
             // Preserve explicit candidate choices for unchanged spans during suffix edits.
             // Central editing and remapping user overrides are the T6 editing layer.
@@ -196,6 +226,7 @@ import Foundation
             accepted = accepted.filter { id, _ in unchangedIDs.contains(id) }
             try refreshCandidates()
         } catch {
+            readingPreview = nil
             segmenter.reset()
             converter.finishComposition()
             // Provider failure is reversible and cannot remove the original input.
@@ -219,7 +250,10 @@ import Foundation
                 leftDisplay += literals[span.id] ?? raw
                 continue
             }
-            if let chosen = accepted[span.id] {
+            if let preview = readingPreview, preview.id == span.id {
+                updated[span.id] = [MixedCandidate(token: UUID().uuidString, text: preview.text)]
+                leftDisplay += preview.text
+            } else if let chosen = accepted[span.id] {
                 updated[span.id] = candidates[span.id] ?? [chosen]
                 leftDisplay += chosen.text
             } else {
