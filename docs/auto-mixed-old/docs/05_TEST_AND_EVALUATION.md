@@ -1,0 +1,109 @@
+# 05. テスト計画と合格条件
+
+## 1. 評価を4つに分離する
+
+1. **素材・数値契約**：同梱reference、schema、fixtureの整合性。
+2. **アプリロジック**：モック分類器・モックZenzaiでキー操作と文字保存を検証。
+3. **学習モデル品質**：凍結holdoutで日英区間判定と保留率を検証。
+4. **実機統合**：実Zenzai・IMK・XPC・対象アプリで操作性と性能を検証。
+
+1が通っても2〜4の代わりにはならない。mockで日本語変換結果を固定しても、実Zenzaiが同じ漢字を出せると報告しない。
+
+## 2. 自動テスト
+
+| テスト群 | 主なケース | 不変条件 |
+|---|---|---|
+| RawBuffer | 挿入、中央削除、絵文字、結合文字 | 元文字を欠落・重複させない |
+| OffsetMap | ASCII/かな/漢字/サロゲート/ZWJ | scalarとUTF-16を混同しない |
+| Features | BOS/EOS、大小文字、unknown、prefix | PythonとSwiftが同じindex集合 |
+| LR export | 正例方向、巨大正負logit、欠損ファイル | finiteなp、正しいlabel方向 |
+| Viterbi | λ=0、切替罰則、tie、hard mask | 定義したcostの最適path |
+| Segmenter | URL、識別子、空白、曖昧語 | 保護tokenと空白を完全維持 |
+| Roman adapter | `shi/si`、`n`、`nn`、`kan'i`、`k` | 依存Converterの仕様と一致 |
+| MixedComposer | 英日交互、3区間以上、候補採用 | JA以外を変換しない |
+| Edit UI | Escape、Tab、Enter、Backspace | rawPreviewと候補選択が混同されない |
+| Lifecycle | commit/stop/deactivate/close | 古い入力欄へeffectを適用しない |
+| XPC | 旧JSON、重複event、重複commit、古いrevision | 欠落・二重確定を起こさない |
+| Learning | preview、取消、英語、学習OFF | 確定済みJAだけ学習 |
+| Resources | fixture model、破損、未知version | 自動モードを安全に開始拒否 |
+| Manual regression | 通常かな漢字、既存shortcuts、custom table | 既存挙動を維持 |
+
+`fixtures/event_cases.json`は期待動作の契約。イベント名は既存API名ではなく、Codexが作るテストハーネスの入力である。OSキーeventへのmappingは別にテストする。
+
+## 3. モデルの指標
+
+以下は**暫定合格目標**。すべて実データと対象マシンで測定してから採用判断する。
+
+| 指標 | 暫定目標・報告方法 |
+|---|---|
+| 英語span破壊率 | 明確な英語spanのうち1文字でもJAへ誤分類したspan数 / 英語span数 ≤0.5% |
+| JA文字recall | 明確なJA_ROMAN文字のうちJAとして処理した割合 ≥90%。保留はFN |
+| JA文字precision | JAと処理した文字のうち正しい割合 ≥98% |
+| 言語境界F1 | 明確なJA↔RAW境界、完全一致基準で≥0.90 |
+| 保護token維持 | 手動確定までraw完全一致。必須fixtureは100% |
+| prefix安定性 | 入力1文字あたりの既存表示runの変更回数・p95を報告 |
+| 初回変換遅延 | 最終的なJA spanに対し変換表示までに必要だった追加打鍵数 |
+| 保留率 | 全体・曖昧語・短語・domain別。0%を目指さない |
+| 校正 | Brier score、10bin reliability、サンプル数。平均pをspan正解確率と扱わない |
+| 保護の副作用 | URLに続く無区切りJAなど、過剰保護のJA miss率 |
+
+全部rawなら英語破壊率0%でもJA recall0%なので不合格。AMBIGUOUSは主指標の分母から分け、raw維持／明示修正のしやすさを測る。
+
+境界F1は正解ラベルがJA/RAWの隣接位置だけを対象にし、GAP/LITERAL/AMBIGUOUSを跨ぐ境界は別集計。英語破壊率には標本数とWilson等の信頼区間を添える。小規模データの「0件」だけで実運用の0.5%以下を証明したと扱わない。
+
+2,000件以上の明確な英語spanを含む独立testを評価開始目安とする。言語、単語、原文groupの偏りを併記する。必要標本数は許容する信頼区間幅に合わせて増やす。
+
+比較baselineは「すべてraw」「単語単位LR」「文字位置LR（λ=0）」「文字位置LR＋Viterbi＋保護／保留」。保護・保留・妥当性検査を一つずつ外すablationを出し、どの仕組みが何を改善／悪化させたか確認する。
+
+## 4. Zenzaiの評価
+
+判定器が渡した原文／読みspanが正しいか、候補生成が正しいか、選択UIが正しいかを分ける。
+
+実Zenzaiでは同じ読みの候補表記が変わり得る。fixtureの`desired_display`は希望例であり、実モデル用の唯一正解としない。人手で許容表記を定めたsubsetに限りTop-1／Top-5を測る。
+
+テストには文脈なし、英語を挟んだ文脈、先行候補変更後、同じ原文だが違う入力欄、異なる2セッションの交互入力を含める。セッションキャッシュの混線や、片方のstopが他方を消す問題を重点確認する。
+
+## 5. 性能計測
+
+| 項目 | 初期budget |
+|---|---|
+| features＋LR＋Viterbi | warm、256 scalars以下、p95≤5msを目標 |
+| モデルファイル | 5MiB以下 |
+| 追加常駐メモリ | mixed機能OFFとの差分32MiB以下を目標 |
+| 子変換session | 32個以下。解放後に無限増加しない |
+| end-to-end | 固定値保証はしない。入力→marked textのp50/p95/p99を実測 |
+
+ZenzaiモデルサイズをプロセスRSSと同一視しない。測定条件にMac型番、チップ、RAM、macOS/Xcode/Swift版、電源設定、モデル／辞書hash、ライブ変換設定を含める。
+
+完成文一括だけでなく、10/20/40文字毎秒のreplay、cold起動、cache hit/miss、連続1,000文字、中央編集、複数アプリ切替で測る。20文字毎秒でqueueが持続的に増える、文字順が崩れる、確定が二重になる場合は不合格。
+
+## 6. 実機の対象表
+
+| 種類 | 最低限の確認例 |
+|---|---|
+| AppKit | TextEdit |
+| WebKit | Safariのtextarea、検索欄 |
+| Chromium | Chromeのtextarea、contenteditable |
+| Electron | VS Codeの編集欄、検索欄 |
+| チャット | WebチャットのEnter送信と複数行入力 |
+| Terminal | Terminal等。初期はmanual推奨、autoは非推奨の実験対象 |
+| セキュア入力 | パスワード／認証ダイアログ。OSの保護経路を侵害しない |
+| アクセシビリティ | キーボードのみの候補修正、状態を色だけに依存しない |
+
+対応アプリとして宣言するには、純英語、混在、Space/Tab/Enter、Cmd+A/C/V、選択変更、フォーカス移動、英数／かな切替をすべて確認する。「エディタだから全欄同じ」は仮定しない。
+
+## 7. 障害注入
+
+応答遅延、同じeventID再送、古いeventID、重複commit effect、ack喪失、サーバーrestart、古いepochの応答、候補選択中の文字追加入力、deactivate直後の返答を再現する。
+
+正常時の二重挿入0件・欠落0件は必須。クラッシュ後に確定の適用有無を確定できないケースでは再挿入しない方針を検証し、原文回復可能性と残余リスクを記録する。再現できなかった障害ケースを「合格」にしない。
+
+## 8. この資料で実行できる検証
+
+```bash
+cd docs/auto-mixed
+python3 -m unittest discover -s reference -p 'test_*.py' -v
+python3 reference/validate_bundle.py
+```
+
+標準ライブラリで動くreferenceの検証。任意で`jsonschema`を導入してschema自体の検証も行う。実Swift parity・学習・macOSビルドは未実行として別欄へ記録する。

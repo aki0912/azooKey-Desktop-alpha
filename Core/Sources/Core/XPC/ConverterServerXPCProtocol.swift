@@ -64,6 +64,8 @@ public enum ConverterMaintenanceCommand: Codable, Sendable {
 /// AI 置換候補などの状態は Server が保持する。この enum はそれらの責務ごとに
 /// 命令をまとめており、通信仕様上の入口を読みやすく保つために平坦な case 群にはしていない。
 public enum ConverterSessionCommand: Codable, Sendable {
+    /// Sent only after the existing snapshot command advertises mixed-input support.
+    case autoMixed(AutoMixedRequest)
     /// セッションの開始・停止に関する命令。
     case lifecycle(ConverterSessionLifecycleCommand)
 
@@ -413,6 +415,8 @@ public enum ConverterClientEffect: Codable, Sendable, Equatable {
 /// Client は `effects` を順に実行したあと、`snapshot` をもとに marked text と
 /// 候補ウィンドウを更新する。
 public struct ConverterServerResponse: Codable, Sendable {
+    public var autoMixedCapability: AutoMixedCapability?
+    public var autoMixed: AutoMixedResponse?
     public var handled: Bool
     public var effects: [ConverterClientEffect]
     public var inputState: ConverterInputState
@@ -426,7 +430,9 @@ public struct ConverterServerResponse: Codable, Sendable {
         inputState: ConverterInputState = .none,
         inputLanguage: InputLanguage? = nil,
         settings: [ConverterSettingDescriptor] = [],
-        snapshot: ConverterSessionSnapshot
+        snapshot: ConverterSessionSnapshot,
+        autoMixedCapability: AutoMixedCapability? = nil,
+        autoMixed: AutoMixedResponse? = nil
     ) {
         self.handled = handled
         self.effects = effects
@@ -434,6 +440,8 @@ public struct ConverterServerResponse: Codable, Sendable {
         self.inputLanguage = inputLanguage
         self.settings = settings
         self.snapshot = snapshot
+        self.autoMixedCapability = autoMixedCapability
+        self.autoMixed = autoMixed
     }
 }
 

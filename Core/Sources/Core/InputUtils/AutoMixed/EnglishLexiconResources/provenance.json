@@ -1,0 +1,68 @@
+{
+  "source_url": "https://downloads.sourceforge.net/project/wordlist/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz",
+  "version": "2020.12.07",
+  "source_revision": "5ef55f9c42730ebe4394a78b77855468a6f15dd2",
+  "archive_sha256": "5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc",
+  "purpose": "runtime_dictionary_only_not_training_data",
+  "source_files": [
+    {
+      "path": "scowl-2020.12.07/final/american-words.10",
+      "sha256": "6ed66394d8b46ed12feac7aad989dfc4620c4f2051316ab774560aae71140994"
+    },
+    {
+      "path": "scowl-2020.12.07/final/american-words.20",
+      "sha256": "a7ae730cd5f2ee11b584c163bf0750cc7659e336c3a04da1a8a2e9c44b604b9e"
+    },
+    {
+      "path": "scowl-2020.12.07/final/american-words.35",
+      "sha256": "c999d002cfe31a2c3d9726eee1b87697402bb71cc831a2c63d064403c6a3a7fb"
+    },
+    {
+      "path": "scowl-2020.12.07/final/british-words.10",
+      "sha256": "cdf5841d5cbd9c0c07bddd7a2eb65b1d3d4c4dc7990f30edccfc0abb7d1236fa"
+    },
+    {
+      "path": "scowl-2020.12.07/final/british-words.20",
+      "sha256": "50a1f325b1b278e418c0084428b1919f2a1ddc2bafc99234e1cf2e442dfca6c3"
+    },
+    {
+      "path": "scowl-2020.12.07/final/british-words.35",
+      "sha256": "afb66faedb0c23d4619aab67110b58f0f640799811f51ef4182f5814f733c2ab"
+    },
+    {
+      "path": "scowl-2020.12.07/final/british_z-words.10",
+      "sha256": "b205f1522869e4224dbe863df68384406bd7384b6449369da0d804a4a8c7f060"
+    },
+    {
+      "path": "scowl-2020.12.07/final/british_z-words.20",
+      "sha256": "ef753e8715274875746ce111ce287ace4f60f238ebc167423fc022e289491868"
+    },
+    {
+      "path": "scowl-2020.12.07/final/british_z-words.35",
+      "sha256": "c36736b97d534084d47355223dcea277a1cecb35132e9cdb25cc5f87b33b03c9"
+    },
+    {
+      "path": "scowl-2020.12.07/final/english-contractions.10",
+      "sha256": "3d6036120922bc64e51c0ba3f4c52e24da5d86695ae93168b3f336c6eabfdd25"
+    },
+    {
+      "path": "scowl-2020.12.07/final/english-contractions.35",
+      "sha256": "413da1bae492c46f7fe1d04fc8065d1065d81cf9c65c80de9cedef6cff74abeb"
+    },
+    {
+      "path": "scowl-2020.12.07/final/english-words.10",
+      "sha256": "f19988ecdb0280ab63340e5c5e155a814ab3d0f225ae60f5cb9e000252283b0b"
+    },
+    {
+      "path": "scowl-2020.12.07/final/english-words.20",
+      "sha256": "618998fff18fb9e143a5bab49e669ec48c023758f0db476d6b64ec06994ba71e"
+    },
+    {
+      "path": "scowl-2020.12.07/final/english-words.35",
+      "sha256": "f36ace33ff09bd5eda5f3ccbcc9971c1b6a8887fa62f5ad7f93e3c220d871388"
+    }
+  ],
+  "word_count": 50957,
+  "output_sha256": "905dcb62b4477d8da59b2296a42d02ef2fd2fba9689f97a69dc63c855e14838a",
+  "copyright_sha256": "283326a422e29c510e2ba6805518c418ce3c35ed1fadc3eec83d2da4f6c5a055"
+}

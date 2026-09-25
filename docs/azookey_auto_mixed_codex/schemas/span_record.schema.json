@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auto Mixed span record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {"properties": {"context_available": {"const": true}}, "required": ["context_available"]},
+      "then": {"required": ["left_context"]}
+    },
+    {
+      "if": {"properties": {"context_available": {"const": false}}, "required": ["context_available"]},
+      "then": {"not": {"required": ["left_context"]}}
+    },
+    {
+      "if": {"required": ["left_context"]},
+      "then": {"properties": {"context_available": {"const": true}}, "required": ["context_available"]}
+    }
+  ],
+  "required": [
+    "id",
+    "group_id",
+    "split",
+    "raw",
+    "spans",
+    "category",
+    "provenance"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "split": {
+      "enum": [
+        "train",
+        "dev",
+        "calibration",
+        "test",
+        "fixture"
+      ]
+    },
+    "raw": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "left_context": {
+      "type": "string",
+      "maxLength": 30,
+      "description": "Only committed text already available at this keystroke; scalar length is validated semantically"
+    },
+    "context_available": {
+      "type": "boolean",
+      "description": "true means left_context was obtainable, even if empty"
+    },
+    "spans": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "start",
+          "end",
+          "label"
+        ],
+        "properties": {
+          "start": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "label": {
+            "enum": [
+              "JA_ROMAN",
+              "RAW",
+              "GAP",
+              "LITERAL",
+              "AMBIGUOUS"
+            ]
+          }
+        }
+      }
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "desired_display": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "source_id",
+        "rights_status"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "authored_fixture",
+            "authored",
+            "licensed",
+            "synthetic_approved"
+          ]
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rights_status": {
+          "enum": [
+            "fixture_only",
+            "pending_review",
+            "approved"
+          ]
+        },
+        "source_url": {
+          "type": "string"
+        },
+        "license_id": {
+          "type": "string"
+        },
+        "retrieved_at": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

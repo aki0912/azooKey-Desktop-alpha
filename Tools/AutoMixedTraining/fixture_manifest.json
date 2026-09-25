@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "mode": "fixture",
+  "seed": 20260923,
+  "sources": [
+    {
+      "source_id": "design-spec-2026-09-23",
+      "records": {
+        "path": "../../docs/azookey_auto_mixed_codex/fixtures/span_cases.jsonl",
+        "sha256": "6759b3627937bb497d09e4c345be6fa3fefb49110b7beeb78d72e55a31c74b74"
+      }
+    },
+    {
+      "source_id": "context-contrast",
+      "records": {
+        "path": "../../docs/azookey_auto_mixed_codex/fixtures/context_pairs.jsonl",
+        "sha256": "9d3c44d3ee8584086868aee047f2439b0c4c665d9aab8b50ddc1e6029fb20b39"
+      }
+    }
+  ],
+  "augmentation": {
+    "max_variants": 2,
+    "max_prefixes": 8
+  }
+}

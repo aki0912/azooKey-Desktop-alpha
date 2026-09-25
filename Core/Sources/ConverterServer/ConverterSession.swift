@@ -11,6 +11,7 @@ final class ConverterSession: SegmentManagerDelegate {
     var inputLanguage: InputLanguage = .japanese
     var lastHandledKeyEventID: UInt64?
     var lastKeyEventResponse: ConverterServerResponse?
+    var autoMixed: AutoMixedServerSession?
     private var context = ConverterTextContext()
     var config = ConverterSessionConfig(
         aiBackendPreference: .off,

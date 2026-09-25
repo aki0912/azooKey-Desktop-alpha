@@ -17,13 +17,15 @@ public final class SegmentsManager {
     /// テストなどの設定注入のための型。外部には設定を露出させない。
     public struct Context {
         public init() {}
-        public init(useZenzai: Bool, resourcesDirectoryURL: URL? = nil) {
+        public init(useZenzai: Bool, resourcesDirectoryURL: URL? = nil, learningEnabled: Bool = true) {
             self.useZenzai = useZenzai
             self.resourcesDirectoryURL = resourcesDirectoryURL
+            self.learningEnabled = learningEnabled
         }
 
         var useZenzai: Bool = true
         var resourcesDirectoryURL: URL?
+        var learningEnabled = true
     }
 
     public weak var delegate: (any SegmentManagerDelegate)?
@@ -195,7 +197,7 @@ public final class SegmentsManager {
             keyboardLanguage: .ja_JP,
             englishCandidateInRoman2KanaInput: false,
             fullWidthRomanCandidate: true,
-            learningType: Config.Learning().value.learningType,
+            learningType: self.context.learningEnabled ? Config.Learning().value.learningType : .nothing,
             memoryDirectoryURL: self.azooKeyMemoryDir,
             sharedContainerURL: CompiledUserDictionaryStore.directoryURL(memoryDirectoryURL: self.azooKeyMemoryDir),
             textReplacer: .withDefaultEmojiDictionary(),
@@ -513,7 +515,8 @@ public final class SegmentsManager {
     @MainActor private func updateRawCandidate(
         requestRichCandidates: Bool = false,
         forcedLeftSideContext: String? = nil,
-        forcedRightSideContext: String? = nil
+        forcedRightSideContext: String? = nil,
+        predictionEnabled: Bool? = nil
     ) {
         if self.lastOperation != .delete {
             self.backspaceAdjustedPredictionCandidate = nil
@@ -566,11 +569,44 @@ public final class SegmentsManager {
                 leftSideContext: leftSideContext,
                 rightSideContext: rightSideContext,
                 requestRichCandidates: requestRichCandidates,
-                requireJapanesePrediction: Config.DebugPredictiveTyping().value ? .manualMix : .disabled,
-                requireEnglishPrediction: Config.DebugPredictiveTyping().value ? .manualMix : .disabled
+                requireJapanesePrediction: (predictionEnabled ?? Config.DebugPredictiveTyping().value) ? .manualMix : .disabled,
+                requireEnglishPrediction: (predictionEnabled ?? Config.DebugPredictiveTyping().value) ? .manualMix : .disabled
             )
         )
         self.rawCandidates = result
+    }
+
+    /// T4 preview only. Uses the same dictionaries, resources and options as manual conversion.
+    /// The bridge supplies a validated, complete roman prefix and activates its child session.
+    @MainActor
+    func replaceCompositionFromRaw(
+        _ raw: String, leftContext: String?, rightContext: String?, rich: Bool,
+        completeRomanInput: Bool = false
+    ) -> [Candidate] {
+        self.composingText = ComposingText()
+        self.composingText.insertAtCursorPosition(raw, inputStyle: .roman2kana)
+        if completeRomanInput {
+            self.composingText.insertAtCursorPosition([.init(piece: .compositionSeparator, inputStyle: .roman2kana)])
+        }
+        self.lastInputStyle = .roman2kana
+        self.lastOperation = .insert
+        self.selectionIndex = nil
+        self.didExperienceSegmentEdition = false
+        self.updateRawCandidate(requestRichCandidates: rich, forcedLeftSideContext: leftContext,
+                                forcedRightSideContext: rightContext, predictionEnabled: false)
+        return self.rawCandidates?.mainResults.filter {
+            self.composingText.isWholeComposingText(composingCount: $0.composingCount)
+        } ?? []
+    }
+
+    /// Invoked only by the bridge's explicit commit acknowledgement boundary, never preview.
+    @MainActor
+    func recordMixedCommittedCandidate(_ candidate: Candidate) {
+        guard context.learningEnabled, Config.Learning().value.learningType != .nothing else {
+            return
+        }
+        self.kanaKanjiConverter.setCompletedData(candidate)
+        self.kanaKanjiConverter.updateLearningData(candidate)
     }
 
     @MainActor public func update(requestRichCandidates: Bool) {

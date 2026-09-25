@@ -1,0 +1,163 @@
+# 04. 日英判定モデル・区間推定・学習データ
+
+## 1. 学習するもの
+
+分類対象は「日本語そのもの」と「英語そのもの」ではなく、**現在のASCIIローマ字入力を日本語として変換すべき文字位置**である。
+
+初期モデルはL2正則化のbinary Logistic Regression。各文字位置iの特徴量`x_i`からJAのlogitを出す。
+
+```text
+z_i = b + Σ_j w_j x_ij
+p_i = sigmoid(a × z_i + c)
+```
+
+JA_ROMANを正例1、RAWを負例0に固定する。校正なしならa=1,c=0。Pythonで学習し、重みと語彙をJSONへexport。Swiftは同じ特徴量と内積を実装する。scikit-learnにはLRの学習・正則化の実装があるが、この用途で十分な精度が出るかは本データで検証する。[S14]
+
+Zenzaiの追加学習・大型言語モデル・Core ML変換は初期には不要。小さなsparse線形モデルなので、まず数値仕様を透明に保つ。
+
+## 2. 文字位置特徴量：仕様v1
+
+同梱 `reference/auto_mixed_reference.py` を正とする。以下は必ずPython/Swiftで一致させる。
+
+| 特徴 | 定義 |
+|---|---|
+| 文字window | i-8〜i+8の各位置。相対位置とASCII小文字化した文字値の組 |
+| 文字shape | 同じwindowに対し upper/lower/digit/ascii_other/non_ascii/bos/eos |
+| anchored n-gram | 長さ2,3,4。開始位置はi-4〜i+4。windowを文字列化せず、相対位置も特徴キーへ含める |
+| 境界 | 文頭／文末は文字と衝突しない専用BOS/EOS sentinel |
+| binary presence | 同じ特徴キーは1回だけ。TF-IDF・標準化・頻度加算はしない |
+
+特徴キーはreferenceのASCII-escaped JSON表現に固定する。SwiftのJSONEncoder任せではスラッシュやUnicode escapeが変わり得るため、同じcanonical key writerを実装する。短いキーの生成を最適化する場合もgolden一致を条件にする。
+
+特徴キーはUTF-8で並べた明示的語彙。Pythonの`hash()`、Swiftの`Hasher`は使わない。通常の空白などもwindow内の文脈には使うが、それらの位置自体はbinary学習対象にしない。
+
+小文字化はASCII A–Zだけ。大文字形状の特徴は別に保存する。特徴量を計算するための小文字化で原文を変えない。Unicode全体に対するlocale依存casefoldやNFKCを入れない。
+
+推論単位は入力バッファ全体。ライブ入力ではその時点までのprefixのみを入力し、未来の文字を特徴へ混ぜない。オフライン評価も各prefixを切ってから特徴を再計算する。完成文から作った特徴を途中入力へ流用すると未来情報の漏洩になる。
+
+語彙はtrainのみから作る。max_features初期32768。document frequencyの順位で採用し、同順位はUTF-8順、選んだ語彙の最終順もUTF-8順。閾値はdevで調整する。OOVは無視し、モデルファイルの語彙順を実行時に並べ替えない。
+
+## 3. Viterbi区間推定
+
+文字ごとのラベルをそのまま独立選択すると、JA/RAWが細切れになる。2状態のViterbiで以下を最小化する。
+
+```text
+emission(i, JA)  = -log(clamp(p_i, 1e-7, 1-1e-7))
+emission(i, RAW) = -log(1-clamp(p_i, 1e-7, 1-1e-7))
+pathCost = Σ_i emission(i, label_i)
+         + λ × Σ_i [label_i != label_(i-1)]
+```
+
+λ初期値1.2は実験開始値であり、最適値でも測定結果でもない。devで0,0.4,0.8,1.2,2.0を比較する。各遷移の同コストtieは同じ状態の継続を優先し、次に固定した前状態順で解決する。最終状態の同コストtieはRAWを優先する。参照実装と一致させる。計算量は2状態ならO(n)。
+
+gap/literalを挟んだ位置では状態をリセットして独立に復号する。明確なRAW保護文字はpから切り離しhard RAW maskを適用する。1つの英語語彙に対するsubstring確率を何個も加える方式は、分割数によるスコア比較の偏りを招くため初期版で用いない。
+
+### 3.1 ローマ字としての妥当性
+
+Viterbiはローマ字文法を保証しない。復号したJA runを既存Converterの標準入力表で検査する。
+
+- 確定した内部区間：全体が変換可能でなければ、そのrunをunresolvedへ戻す。
+- バッファ末尾のJA run：変換可能prefix＋未完suffixを許可する。未完部分は原文表示。
+- 他のRAW区間との境界直前に未完子音が残る場合：無理にかな化しない。
+- 判別APIが不足する場合：そのケースをrawへ退避し、API追加を別タスクとして記録する。
+
+初期アルゴリズムは**Viterbi＋妥当性検査**とする。invalid時に無制限の再分割や全substringにZenzaiを呼ぶ探索は行わない。必要なら将来top-K pathの再評価を追加するが、まず失敗例と発生率を収集する。
+
+### 3.2 保留と表示安定化
+
+Viterbiのpathから得る確信度指標は、span内p_iの平均と最小値を記録する。これらを「spanの校正済み正解確率」と呼ばない。
+
+初期値：新しくJA表示へ入るrunは平均p≥0.90、既にJA表示中の**同じ原文区間**の維持は平均p≥0.65を候補条件とする。0.65未満はraw表示へ戻す。平均条件を満たしても、曖昧語リスト・ローマ字妥当性検査・保護規則が優先する。境界が変わったrunは新規扱い。単純な実装を先に評価する。
+
+短い孤立語`made/no/to/name`は初期保留リストの例。保留はそのrunが独立tokenとして現れた場合に適用し、`ashitamade`の末尾を一律に消さない。長い文章内でも真の意図が曖昧なケースは別評価する。
+
+閾値を上げるだけで全入力をrawにして「英語を壊さない精度」を達成しない。JA recallとcoverageを同時にrelease gateへ入れる。
+
+## 4. データ形式
+
+`schemas/span_record.schema.json` と `fixtures/span_cases.jsonl` を参照。rawは利用者が打つ文字列そのもの。区間offsetはUnicode scalar、end-exclusive。
+
+```json
+{
+  "id": "example-001",
+  "group_id": "authored-sentence-001",
+  "split": "test",
+  "raw": "ashita meeting desu",
+  "spans": [
+    {"start": 0, "end": 6, "label": "JA_ROMAN"},
+    {"start": 6, "end": 7, "label": "GAP"},
+    {"start": 7, "end": 14, "label": "RAW"},
+    {"start": 14, "end": 15, "label": "GAP"},
+    {"start": 15, "end": 19, "label": "JA_ROMAN"}
+  ],
+  "category": "mixed_spaced",
+  "provenance": {"kind": "authored_fixture", "source_id": "local-example", "rights_status": "fixture_only"},
+  "note": "希望する区間。実モデルの予測結果ではない"
+}
+```
+
+`AMBIGUOUS`は正解意図を一意に固定しない評価用ラベル。binary学習では除外する。ただし意図が別途明示された日本語文中の`made`は、その意図に従ってJAとする。LITERAL/GAP位置もbinary学習対象から除外するが、周囲の文脈特徴には残す。
+
+日本語の目標表記・読みは別metadataに保持してよい。モデルが入力としてその正解表記を読むことは禁止する。
+
+## 5. 学習データ作成手順
+
+### 5.1 小規模データから始める
+
+最初に人手確認した500〜1,000件を用意し、パイプラインの妥当性を検証する。その後10,000件、必要なら50,000件へ増やす。件数は計画値であり、必要十分なデータ量の保証ではない。
+
+日本語だけ、英語だけ、英日混在・日英混在・多境界、空白あり／なし、開発用語、URL等の保護対象、固有名詞、曖昧語、未完ローマ字を含める。英語negativeだけにURL記号が偏らないよう、普通の英文と短単語を十分に含める。
+
+文章の内容が違うだけの同じ定型句を大量生成して件数を稼がない。学習例には一般会話、説明文、メール、検索語、技術メモなど複数domainを含め、domain別指標を出す。
+
+### 5.2 読みとローマ字の生成
+
+権利を確認した日本語文に、正しい読み・意図する英語spanを付与する。漢字の読みを無検証の機械推定だけで正解にしない。固有名詞、助詞のは／へ／を、数字の読みは重点確認する。
+
+読みから標準入力表に沿った複数の打鍵表記を生成する。`shi/si`、`chi/ti`、`tsu/tu`、小書き文字、促音、`n`の曖昧性など、**固定したConverterが受理する表記だけ**を採用する。別ライブラリのローマ字化がIMEの実入力表と一致すると仮定しない。
+
+テンプレートで英語spanとJA raw spanを連結すれば、offsetは連結長から正確に作れる。英語spanを日本語学習器の都合で小文字化しない。
+
+### 5.3 分割・増強・prefix
+
+元文章・作成テンプレート系列・英日言い換え元を`group_id`で束ね、増強前にtrain/dev/calibration/testへ70/10/10/10で分割する。同じ元文のローマ字variant、大小文字variant、途中prefixを別splitへ入れない。近重複も検査する。
+
+学習には完成文だけでなく、各原文のランダムprefixを最大8個程度サンプルする。短prefixは優先的に加える。長文からすべてのprefixを生成して長い文だけが重くなることを避ける。元文あたりの総sample weightを正規化する。
+
+prefixの文字ラベルは元の意図ラベルを持つが、評価の際は入力だけで判定不能な段階を許容保留として区別する。ライブ入力の「不要な表示変化数」「確信が得られるまでの打鍵数」も測定する。
+
+### 5.4 権利とプライバシー
+
+provenanceにsource_id、取得日、license識別子、出典URL、利用範囲、加工処理、group_idの作成規則を記録する。第三者の入力履歴、ソースコード、メール、SNSを勝手に収集しない。
+
+同梱fixtureは仕様説明用の少数の自作文であり、商用モデルの学習母集団として十分な権利審査／品質検査が済んだコーパスと扱わない。生成モデルを使ったデータ増強では、そのサービス／モデルの当該用途に対する規約を別途確認し、データを使う責任者が承認する。
+
+## 6. 学習・校正・export
+
+1. `validate_data`：schema、被覆、Unicode範囲、group split、権利statusを検査。
+2. `build_vocabulary`：trainのみから特徴語彙を固定。
+3. `train`：疎行列でLR学習。初期C候補0.1/1/10、solver等は選んだsklearn版で検証しlock fileへ固定する。短語や保護tokenの比率、class weightの有無を記録する。
+4. `select`：devでλ、閾値、正則化を選ぶ。testへ合わせ込まない。
+5. `calibrate`：独立calibration splitを用い、logitに対するsigmoid校正を行う。十分な件数がなければ未校正として明示する。[S15]
+6. `export`：正例方向を確認して`sigmoid(a*z+c)`へ統一。ライブラリが`1/(1+exp(A*z+B))`を返す規約ならa=-A,c=-B。内部属性名に依存した未検証exportをしない。
+7. `parity`：100件以上のgoldenでPython/Swiftのactive feature index、logit、p、Viterbi pathを比較。
+8. `evaluate`：凍結testとtyping traceを1回評価し、モデルカードと合否を保存。
+
+`class_weight`を使った確率は自動的に実運用の出現率で校正済みとは言えない。採用時は校正とdomain shiftを必ず検証する。Brier scoreとreliability binsを出す。
+
+### 6.1 モデルファイル
+
+`schemas/language_model.schema.json`を使用する。必須項目：schema_version、feature_spec_version、kind、positive_label、vocabulary、coefficients、intercept、calibration、decoder、thresholds、training_manifest_sha256、model_version。
+
+float64を初期値とし、NaN/Inf・重複語彙・語彙数と係数数の不一致を拒否する。モデルファイル全体のSHA-256を別manifestに記録する（自己参照checksumをJSON内へ埋めない）。署名済みbundleに同梱し、ダウンロード更新は初期対象外。
+
+語彙32768、モデルファイル上限5MiB、追加常駐メモリ32MiBを暫定budgetとする。Float32/量子化は実測後に別artifact versionで評価する。`kind=fixture`のダミー重みは本番自動モードで必ず拒否する。
+
+## 7. 判定の限界
+
+`made`だけを見て「英語の過去形」か「まで」かを完全に決めることはできない。このモデルは意図を魔法のように知るものではない。既存アプリの文脈を追加特徴にすると改善余地はあるが、初期の文字位置モデルの仕様を変更するため別実験にする。
+
+当初の目標は「すべてを当てる」ではなく、英語を壊す事故を抑えながら、一般的な混在文章の手動切替回数を減らすこと。保留、区間修正、manualへの退避を製品の一部として扱う。
+
+---
+出典番号は [08. 一次資料・設計判断](08_SOURCES_AND_DECISIONS.md) を参照。

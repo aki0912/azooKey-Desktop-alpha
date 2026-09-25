@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "mode": "approved",
+  "seed": 20260924,
+  "augmentation": {
+    "max_variants": 2,
+    "max_prefixes": 8
+  },
+  "sources": [
+    {
+      "source_id": "ai-authored-review-20260924",
+      "records": {
+        "path": "samples_50.jsonl",
+        "sha256": "f7e0bda2f3d189af45cb640d604f18bb123722cef2edf199f6c51f3b4e6c3060"
+      },
+      "approval": {
+        "status": "approved",
+        "reviewer": "conversation_user",
+        "reviewed_at": "2026-09-24",
+        "license_id": "LicenseRef-UserAuthorization-20260924",
+        "source_url": "authored:ai-authored-review-20260924",
+        "retrieved_at": "2026-09-24",
+        "allowed_uses": [
+          "training",
+          "evaluation",
+          "derived_model"
+        ],
+        "evidence": {
+          "path": "RIGHTS_REVIEW.md",
+          "sha256": "ae97ef9198e516c553960bea4ac5a0de2d07671ca57d0d2c5934f47363f7fb5a"
+        },
+        "grouping_rule": "Original sentence, related context contrasts and spelling variants share group_id; split groups before augmentation.",
+        "processing": "User-reviewed AI-authored text; provenance-only approval copy; no external corpus or input-history collection.",
+        "privacy_reviewed": true
+      }
+    }
+  ]
+}

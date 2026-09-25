@@ -35,6 +35,7 @@ var targets: [Target] = [
             .product(name: "Crypto", package: "swift-crypto"),
             .product(name: "ZIPFoundation", package: "ZIPFoundation")
         ],
+        resources: [.copy("InputUtils/AutoMixed/EnglishLexiconResources")],
         swiftSettings: [.interoperabilityMode(.Cxx)],
         plugins: [
             .plugin(name: "GitInfoPlugin")
@@ -54,6 +55,11 @@ products.append(
         targets: ["ConverterServer"]
     )
 )
+products.append(.executable(name: "AutoMixedPlayground", targets: ["AutoMixedPlayground"]))
+targets.append(.executableTarget(
+    name: "AutoMixedPlayground", dependencies: ["Core"],
+    swiftSettings: [.interoperabilityMode(.Cxx)]
+))
 targets.append(
     .executableTarget(
         name: "ConverterServer",

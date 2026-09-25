@@ -4,7 +4,7 @@ import Foundation
 import KanaKanjiConverterModuleWithDefaultDictionary
 
 private enum ConverterServerXPC {
-    static let machServiceName = "dev.ensan.inputmethod.azooKeyMac.ConverterServer"
+    static let machServiceName = IMEIdentity.current.machServiceName
 }
 
 @objc private protocol ConverterServerXPCProtocol {
@@ -20,6 +20,9 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
     private var sessions: [String: ConverterSession] = [:]
     private let kanaKanjiConverter = KanaKanjiConverter.withDefaultDictionary()
     private let learningDataCommitScheduler = DebouncedActionScheduler()
+    private let serverEpoch = UUID()
+    private var mixedRuntime: AutoMixedRuntime?
+    private var attemptedMixedRuntime = false
 
     func openSession(with reply: @escaping @Sendable (String) -> Void) {
         DispatchQueue.main.async {
@@ -36,6 +39,7 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
             MainActor.assumeIsolated {
                 let session = self.sessions.removeValue(forKey: sessionID)
                 if let session {
+                    session.autoMixed?.close()
                     self.kanaKanjiConverter.removeSession(session.conversionSessionID)
                 }
                 let removed = session != nil
@@ -51,15 +55,32 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
     func handleCommand(_ data: Data, with reply: @escaping @Sendable (Data?, NSString?) -> Void) {
         // キー入力の応答はユーザー操作のクリティカルパスなので、システム負荷が高い時も
         // utility/background work より先に実行される優先度で Server actor へ渡す。
+        let arrived = MixedDiagnostics.enabled ? DispatchTime.now().uptimeNanoseconds : nil
         Task(priority: .userInitiated) { @MainActor in
+            let began = arrived.map { _ in DispatchTime.now().uptimeNanoseconds }
+            var diagnostic: [MixedDiagnostics.Field: MixedDiagnostics.Value] = [:]
             do {
                 let command = try ConverterServerCodec.decodeCommand(from: data)
-                let response = try await self.handle(command)
+                diagnostic = MixedDiagnostics.fields(for: command)
+                MixedDiagnostics.record(.serverReceive, diagnostic)
+                let trace = MixedDiagnostics.enabled ? MixedPerformance.Trace() : nil
+                let response = try await MixedPerformance.$trace.withValue(trace) { try await self.handle(command) }
+                if let trace {
+                    var performance = MixedDiagnostics.performanceFields(trace.snapshot())
+                    performance.merge(diagnostic) { _, new in new }
+                    if let arrived, let began { performance[.serverQueueUS] = .number(Int((began - arrived) / 1000)) }
+                    MixedDiagnostics.record(.performance, performance)
+                }
+                diagnostic[.capability] = .flag(response.autoMixedCapability != nil)
+                diagnostic[.active] = .flag(response.autoMixed != nil)
+                if let status = response.autoMixed?.status { diagnostic[.status] = .status(status) }
+                MixedDiagnostics.record(.serverReply, diagnostic)
                 self.learningDataCommitScheduler.postponeIfScheduled(
                     after: Self.learningDataCommitDelay
                 )
                 reply(try ConverterServerCodec.encode(response), nil)
             } catch {
+                MixedDiagnostics.record(.serverFailure, diagnostic)
                 self.learningDataCommitScheduler.postponeIfScheduled(
                     after: Self.learningDataCommitDelay
                 )
@@ -115,9 +136,19 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
     }
 
     @MainActor
+    // Keep the wire-command dispatch exhaustive and visible in one switch.
+    // swiftlint:disable:next cyclomatic_complexity
     private func handle(_ command: ConverterSessionCommand, sessionID: String) async throws -> ConverterServerResponse {
         let session = try getSession(sessionID)
         switch command {
+        case .autoMixed(let request):
+            // Child sessions must never be activated inside the legacy withSession.
+            guard let runtime = automaticMixedRuntime() else {
+                return ConverterServerResponse(snapshot: .empty,
+                    autoMixed: .rejected(request, epoch: serverEpoch, status: .unavailable))
+            }
+            if session.autoMixed == nil { session.autoMixed = runtime.makeSession(epoch: serverEpoch) }
+            return try session.autoMixed!.handle(request)
         case .lifecycle(let command):
             return try withConverterSession(session) {
                 handle(command, session: session)
@@ -136,6 +167,11 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
                 try handleKeyEvent(sessionID: sessionID, request: request)
             }
         case .composition(let command):
+            if case .snapshot = command {
+                var result = try withConverterSession(session) { handle(command, session: session) }
+                if automaticMixedRuntime() != nil { result.autoMixedCapability = .init(serverEpoch: serverEpoch) }
+                return result
+            }
             return try withConverterSession(session) {
                 handle(command, session: session)
             }
@@ -146,6 +182,22 @@ final class ConverterServer: NSObject, ConverterServerXPCProtocol, @unchecked Se
         case .replaceSuggestion(let command):
             return try await handle(command, session: session)
         }
+    }
+
+    @MainActor
+    private func automaticMixedRuntime() -> AutoMixedRuntime? {
+        if !attemptedMixedRuntime {
+            attemptedMixedRuntime = true
+            let enabled = AutoMixedExperiment.configuration(in: Self.appResourcesDirectoryURL()) != nil
+            MixedDiagnostics.record(.runtimeStage, [.stage: .token(.marker), .experiment: .flag(enabled)])
+            guard enabled else {
+                return nil
+            }
+            mixedRuntime = try? AutoMixedRuntime(resources: Self.appResourcesDirectoryURL(),
+                converter: kanaKanjiConverter, applicationDirectory: AppGroup.memoryDirectoryURL())
+            MixedDiagnostics.record(.runtimeStage, [.stage: .token(.ready), .success: .flag(mixedRuntime != nil)])
+        }
+        return mixedRuntime
     }
 
     @MainActor
@@ -337,6 +389,26 @@ private final class ServiceDelegate: NSObject, NSXPCListenerDelegate {
     }
 }
 
+// Read-only build verification; do not create a converter, user store, or Mach listener.
+if Array(CommandLine.arguments.dropFirst()) == ["--identity"] {
+    let identity = IMEIdentity.current
+    let metadata = ["bundleIdentifier": identity.bundleIdentifier, "machServiceName": identity.machServiceName,
+                    "preferencesIdentifier": identity.preferencesIdentifier, "keychainAccount": identity.keychainAccount,
+                    "dataScope": identity == .mixed ? "isolated-local" : "standard-app-group"]
+    if let data = try? JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys]),
+       let text = String(data: data, encoding: .utf8) {
+        print(text)
+        exit(EXIT_SUCCESS)
+    }
+    exit(EXIT_FAILURE)
+}
+
+// Dependency debug output can contain composition text. Silence experimental
+// processes before accepting input; the default manual process is unchanged.
+if AutoMixedExperiment.configuration(in: ConverterServer.appResourcesDirectoryURL()) != nil {
+    freopen("/dev/null", "w", stdout)
+    freopen("/dev/null", "w", stderr)
+}
 let listener = NSXPCListener(machServiceName: ConverterServerXPC.machServiceName)
 private let delegate = ServiceDelegate()
 listener.delegate = delegate

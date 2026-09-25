@@ -4,6 +4,8 @@
 
 **現在アルファ版のため、動作は一切保証できません**。
 
+このブランチの日英自動混在入力については、[Mixed版の導入手順](Tools/AUTO_MIXED_IME.md)と[開発・検証ガイド](Tools/AUTO_MIXED_DEVELOPMENT.md)を参照してください。
+
 ## 動作環境
 
 macOS 15で動作確認しています。macOS 14およびmacOS 26でも利用できますが、動作は検証していません。

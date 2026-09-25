@@ -7,7 +7,7 @@ import KanaKanjiConverterModule
 public enum CustomInputTableStore {
     /// The identifier used when registering the custom input table.
     public static let tableName: String = "azooKeyMac.customRomajiTable"
-    private static let appSupportSubdir = "azooKeyMac"
+    private static let appSupportSubdir = IMEIdentity.current.customTableDirectoryName
     private static let directoryName = "CustomInputTable"
     private static let fileName = "custom_input_table.tsv"
 

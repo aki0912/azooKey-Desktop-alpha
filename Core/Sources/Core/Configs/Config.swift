@@ -4,7 +4,13 @@ import Foundation
 public enum Config {
     nonisolated(unsafe) public static let userDefaults: UserDefaults = {
         #if os(macOS)
-        UserDefaults(suiteName: AppGroup.azooKeyMacIdentifier) ?? .standard
+        if IMEIdentity.current == .mixed {
+            guard let isolated = UserDefaults(suiteName: IMEIdentity.mixed.preferencesIdentifier) else {
+                preconditionFailure("Unable to open isolated preferences")
+            }
+            return isolated
+        }
+        return UserDefaults(suiteName: IMEIdentity.current.preferencesIdentifier) ?? .standard
         #else
         .standard
         #endif
@@ -14,21 +20,21 @@ public enum Config {
         if let value = Self.userDefaults.object(forKey: key) {
             return value
         }
-        return UserDefaults.standard.object(forKey: key)
+        return IMEIdentity.current == .mixed ? nil : UserDefaults.standard.object(forKey: key)
     }
 
     public static func data(forKey key: String) -> Data? {
         if let value = Self.userDefaults.data(forKey: key) {
             return value
         }
-        return UserDefaults.standard.data(forKey: key)
+        return IMEIdentity.current == .mixed ? nil : UserDefaults.standard.data(forKey: key)
     }
 
     public static func string(forKey key: String) -> String? {
         if let value = Self.userDefaults.string(forKey: key) {
             return value
         }
-        return UserDefaults.standard.string(forKey: key)
+        return IMEIdentity.current == .mixed ? nil : UserDefaults.standard.string(forKey: key)
     }
 
     public static func set(_ value: Any?, forKey key: String) {

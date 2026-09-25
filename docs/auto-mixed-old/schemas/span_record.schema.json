@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auto Mixed span record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "group_id",
+    "split",
+    "raw",
+    "spans",
+    "category",
+    "provenance"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "split": {
+      "enum": [
+        "train",
+        "dev",
+        "calibration",
+        "test",
+        "fixture"
+      ]
+    },
+    "raw": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "spans": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "start",
+          "end",
+          "label"
+        ],
+        "properties": {
+          "start": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "label": {
+            "enum": [
+              "JA_ROMAN",
+              "RAW",
+              "GAP",
+              "LITERAL",
+              "AMBIGUOUS"
+            ]
+          }
+        }
+      }
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "desired_display": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "source_id",
+        "rights_status"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "authored_fixture",
+            "authored",
+            "licensed",
+            "synthetic_approved"
+          ]
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rights_status": {
+          "enum": [
+            "fixture_only",
+            "pending_review",
+            "approved"
+          ]
+        },
+        "source_url": {
+          "type": "string"
+        },
+        "license_id": {
+          "type": "string"
+        },
+        "retrieved_at": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

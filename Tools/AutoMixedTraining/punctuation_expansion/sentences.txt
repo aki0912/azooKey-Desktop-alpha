@@ -1,0 +1,248 @@
+# Authored intentions. [English] {protected literal}; all other kana is Japanese.
+@japanese_period
+にもつがとどいたられんらくしてください.
+まどをしめてからでかけます.
+あさごはんをたべてがっこうへいきます.
+かえりにぎゅうにゅうをかってきます.
+このみちをまっすぐすすんでください.
+つぎのかどをみぎにまがります.
+おゆがわいたらひをとめてください.
+つくえのうえにかぎをおきました.
+ごみのひをかくにんしておきます.
+はなのみずやりをわすれないでください.
+きょうははやめにねるつもりです.
+ふるいでんちをあつめておきます.
+いすのたかさをちょうせいしました.
+ひつようなしょるいをそろえてください.
+せんたくものをとりこんでおきました.
+くわしいじゅうしょをおしえてください.
+あたらしいしゃしんをみせてください.
+おくれるばあいはさきにつたえてください.
+おかねをはらってからうけとります.
+みせのまえでまちあわせしましょう.
+@japanese_internal
+はれたらでかけます,あめならいえにいます.
+まずなまえをかいて,つぎにひづけをいれます.
+ごはんをたべて,くすりをのみました.
+いそがなくていいので,あわてずにすすんでください.
+このへやはあかるいけれど,すこしせまいです.
+いったんとめて,さいしょからやりなおします.
+つくりかたをよんで,じゅんびをはじめました.
+へんじはあしたでいいです,きょうはやすんでください.
+はじめはむずかしかったけれど,いまはなれました.
+ちずをひらいて,えきのばしょをさがします.
+@japanese_questions
+どのいろがすきですか?
+ここにすわってもいいですか?
+あさはなんじにおきますか?
+このにもつはおもいですか?
+まどをあけてもだいじょうぶですか?
+このしゃしんをつかってもいいですか?
+どちらのでぐちへすすみますか?
+ひるごはんはもうたべましたか?
+あたらしいほうほうをためしませんか?
+そのほんをかしてもらえますか?
+@japanese_marks
+やっとできました!
+おたんじょうびおめでとう!
+きょうもおつかれさまでした!
+すばらしいけっかでした!
+もうすこしでつきます!
+まだきまっていません...
+すこしかんがえさせてください...
+うまくいくとおもったのですが...
+こたえはまだわかりません...
+つづきはまたこんど...
+@japanese_brackets
+{[}とりあつかいちゅうい{]}
+{[}らいしゅうのよてい{]}
+{[}かくにんをおねがいします{]}
+{[}ほんじつはおやすみです{]}
+{[}あとでよみかえす{]}
+(さんかできるひとだけでだいじょうぶです)
+(あとでじかんをちょうせいします)
+(くわしくはしたをみてください)
+(このぶぶんはへんこうできます)
+(まだきまっていないところがあります)
+"おかえりなさい"とこえをかけました.
+"またあした"といってわかれました.
+"ここでまっていて"とたのみました.
+"おさきにどうぞ"とゆずりました.
+"たすかりました"とおれいをいいました.
+@japanese_long_vowel
+あたたかいこ-ひ-をいれます.
+えきのちかくのす-ぱ-によりました.
+おひるはら-めんをたべました.
+あたらしいの-とをかいました.
+おやつにけ-きをたべましょう.
+て-ぶるのうえをかたづけます.
+かれ-のざいりょうをそろえました.
+す-ぷがさめないうちにのみます.
+ほ-むででんしゃをまっています.
+れし-とのきんがくをかくにんします.
+@mixed_work
+この[report]をきょうじゅうによんでください.
+あたらしい[design]についてそうだんしたいです.
+その[task]はあしたからはじめます.
+[feedback]をまとめておくりました.
+じかいの[meeting]はみじかくしましょう.
+しゅうせいした[document]をかくにんしてください.
+[release]のじゅんびがおわりました.
+きょうの[agenda]をきょうゆうします.
+[review]のけっかをのこしてください.
+[deadline]をすこしのばせますか?
+この[idea]はおもしろいですね!
+[progress]をみてからきめましょう.
+あたらしい[plan]ならすすめられそうです.
+しゅうまつまでに[budget]をかくにんします.
+[project]のせつめいをついかしました.
+@mixed_internal
+さいしょに[backup],つぎにこうしんをおこないます.
+[online]ならさんかできます,げんちにはいけません.
+[Yes]とへんじしました,ないようもかくにんずみです.
+まず[save],それからがめんをとじます.
+[low]から[high]へせっていをかえます.
+この[comment]はのこして,ふるいほうをけします.
+[option]をえらんでから,かくにんをおしてください.
+じゅんびができたら[start],おわったら[stop]です.
+[before]と[after]をくらべてみます.
+その[message]はよみました,あとでへんじします.
+@mixed_brackets
+{[}[draft]{]}このぶんしょうはまだとちゅうです.
+{[}[done]{]}かくにんがおわりました.
+{[}[memo]{]}あとでよむきじです.
+([optional])ひつようならにゅうりょくしてください.
+([example])つかいかたをしめします.
+"[open]"をえらんでください.
+"[cancel]"をおすともどります.
+"[loading]"のひょうじがきえました.
+このこうもくは[title](ひょうだい)です.
+[status]:かくにんをまっています.
+@mixed_everyday
+[coffee]をのんでからしゅっぱつします.
+[shopping]のりすとをつくりました.
+きょうの[dinner]はなににしましょう?
+あたらしい[camera]をためしたいです.
+すきな[music]をかけてください.
+[weekend]のよていはまだありません.
+この[recipe]はかんたんでした.
+[photo]をいちまいおくってください.
+[weather]をみてふくをきめます.
+[delivery]はごごにとどくそうです.
+@english_period
+[Please close the door quietly].
+[The next bus leaves in ten minutes].
+[We found a small cafe near the station].
+[Remember to water the plants before leaving].
+[I will bring the printed documents tomorrow].
+[The package arrived earlier than expected].
+[She keeps a notebook beside the window].
+[Our office will be closed on Monday].
+[The new schedule works well for everyone].
+[They moved the chairs into the hallway].
+[Please leave the key on the kitchen table].
+[This blue jacket belongs to my brother].
+[The soup needs a little more salt].
+[I heard the same story last winter].
+[We should check the address before we leave].
+[My name appears on the final page].
+[He made a copy for each person].
+[There is no need to hurry today].
+[You can take the smaller bag with you].
+[They came back before the shop closed].
+@english_internal
+[If you arrive early], [please wait inside].
+[We ordered tea], [coffee], [and a glass of water].
+[First save your changes]; [then close the window].
+[She was tired], [but she finished the report].
+[The message was short]: [please call me].
+[I checked the list], [and every name was there].
+[For now], [we can use the old design].
+[Yes], [the order has already been shipped].
+[No], [you do not need a separate ticket].
+[After lunch], [we walked along the river].
+@english_questions
+[Can you open the window]?
+[Which platform does this train use]?
+[Did you receive the invitation]?
+[Where should I put these boxes]?
+[Would you like another cup of tea]?
+[How long does the review usually take]?
+[Is there a quieter room available]?
+[Do you remember the name of the book]?
+[Can we meet a little later]?
+[Have you made any changes to the file]?
+@english_marks
+[That was a wonderful performance]!
+[Thanks for helping with the move]!
+[Please watch your step]!
+[We finally reached the top]!
+[Have a safe trip home]!
+[I thought we had more time]...
+[Let me think about that]...
+[There may be another way]...
+[Well], [that is unexpected]!
+[Wait], [are you sure]?
+@english_brackets
+([Please keep this receipt]).
+([Only one entry per person]).
+([The details may change]).
+{[}[urgent]{]} [Please check the attached report].
+{[}[approved]{]} [The request is ready].
+[She said] "[welcome back]".
+[Choose] "[continue]" [to proceed].
+[The word] "[name]" [appears twice].
+[This is a well-known example].
+[We need a full-time assistant].
+@protected_symbols
+{https://example.invalid/news} をひらいてください.
+{https://example.invalid/a-b?q=one&lang=en} をほぞんしました.
+{https://example.invalid/docs/guide.pdf} をよみます.
+{www.example.invalid} はれんしゅうようのあどれすです.
+{user@example.invalid} へおくるないようをかくにんします.
+{team+notes@example.invalid} をあてさきにいれました.
+{report.v2.txt} をべつのふぉるだへうつします.
+{image-final.png} をてんぷしました.
+{settings.json} のないようをよみます.
+{draft_2026.md} にきろくしてください.
+{src/main.swift} のへんこうをかくにんします.
+{/tmp/example/output.log} をしらべます.
+{user_name} はそのままのこしてください.
+{HTTPServer} のせっていをみなおします.
+{foo::bar} をけんさくします.
+{v1.2.3} にもどしてかくにんしました.
+{3.14} をにゅうりょくしました.
+{-12.5} というあたいがでました.
+{1,000} えんをはらいました.
+{2026-09-24} のよていをかくにんします.
+{10:30} にえきであいましょう.
+{50%} までじゅうでんしました.
+{(a+b)*2} はけいさんしきです.
+{[0]} ははいれつのせんとうです.
+{a/b} をそのままにゅうりょくします.
+{C:\\example\\notes.txt} をひらくてじゅんです.
+{#topic} をめもにのこしました.
+{item@example.invalid} [is a sample address].
+[Open] {archive.tar.gz} [after downloading].
+[Use] {3.14159} [as the initial value].
+[The meeting starts at] {09:45}.
+[The ratio is] {4:3}, [not] {16:9}.
+[Read] {docs/setup.md} [for more information].
+[The price is] {$12.50}.
+[Keep] {snake_case} [unchanged].
+[Search for] {alpha-beta.txt} [in the folder].
+[The example URL is] {https://example.invalid/a?x=1}.
+[Add] {--help} [to see the available options].
+[The identifier is] {order_id}.
+[Copy] {user+demo@example.invalid} [exactly].
+@unicode_symbols
+{「}そのままのこしてください{」}とつたえました.
+{（}あとでかくにんします{）}
+{、}をふくむれんしゅうです{。}
+{。}のまえのぶんしょうをかくにんします.
+{👩‍💻} きょうもさぎょうをはじめます.
+{é} はけつごうもじのれいです.
+[The label contains] {「sample」}.
+[Keep the symbol] {ー} [as it is].
+{【}じゅうよう{】}よくよんでください.
+{🙂} [Thank you for the update]!

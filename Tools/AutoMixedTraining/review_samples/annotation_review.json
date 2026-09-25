@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "kind": "annotation_review",
+  "decision": "accepted",
+  "reviewer": "conversation_user",
+  "reviewed_at": "2026-09-24",
+  "evidence": {
+    "type": "user_message_in_current_conversation",
+    "quote": "サンプルデータは全件オッケーです。"
+  },
+  "scope": [
+    "sample_content",
+    "intended_readings_and_labels",
+    "roman_spelling_variants"
+  ],
+  "artifacts": [
+    {
+      "path": "samples_50.jsonl",
+      "sha256": "10a43a4ffba47ce8e94b2d5cfb513ba3439688aceba78d95e902841383fc3bf0",
+      "accepted_record_ids": [
+        "sample-001",
+        "sample-002",
+        "sample-003",
+        "sample-004",
+        "sample-005",
+        "sample-006",
+        "sample-007",
+        "sample-008",
+        "sample-009",
+        "sample-010",
+        "sample-011",
+        "sample-012",
+        "sample-013",
+        "sample-014",
+        "sample-015",
+        "sample-016",
+        "sample-017",
+        "sample-018",
+        "sample-019",
+        "sample-020",
+        "sample-021",
+        "sample-022",
+        "sample-023",
+        "sample-024",
+        "sample-025",
+        "sample-026",
+        "sample-027",
+        "sample-028",
+        "sample-029",
+        "sample-030",
+        "sample-031",
+        "sample-032",
+        "sample-033",
+        "sample-034",
+        "sample-035",
+        "sample-036",
+        "sample-037",
+        "sample-038",
+        "sample-039",
+        "sample-040",
+        "sample-041",
+        "sample-042",
+        "sample-043",
+        "sample-044",
+        "sample-045",
+        "sample-046",
+        "sample-047",
+        "sample-048",
+        "sample-049",
+        "sample-050"
+      ]
+    },
+    {
+      "path": "roman_variants/preview.json",
+      "sha256": "f6928d2d2d2d1c44c1f703ddcf5fba6859d44cf1857e06fb79eef882a0167e82",
+      "accepted_record_ids": [
+        "sample-001--roman-1",
+        "sample-001--roman-2",
+        "sample-002--roman-1",
+        "sample-007--roman-1",
+        "sample-008--roman-1",
+        "sample-012--roman-1",
+        "sample-014--roman-1",
+        "sample-018--roman-1",
+        "sample-019--roman-1",
+        "sample-019--roman-2",
+        "sample-020--roman-1",
+        "sample-020--roman-2",
+        "sample-034--roman-1"
+      ]
+    }
+  ],
+  "counts": {
+    "originals": 50,
+    "roman_variants": 13,
+    "total": 63
+  },
+  "rights_review_status": "pending_review",
+  "note": "内容・注釈の採用記録。権利確認manifestやモデル品質評価ではない。対象内容を変更した場合、この記録を自動継承しない。"
+}
