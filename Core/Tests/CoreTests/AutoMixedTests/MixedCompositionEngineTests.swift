@@ -188,7 +188,7 @@ private struct MockSegmenter: LanguageSegmenter {
         #expect(try engine.handle(.enter).disposition == .fallthroughToApplication)
     }
 
-    @Test func firstEscapeKeepsRawPreviewUntilEdit() throws {
+    @Test func firstEscapeKeepsRawPreviewUntilTabResumesConversion() throws {
         let converter = MockConverter()
         let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)
         try engine.handle(.insert("ashita"))
@@ -197,12 +197,37 @@ private struct MockSegmenter: LanguageSegmenter {
         #expect(try engine.markedText().text == "ashita")
         #expect(try engine.markedText().text == "ashita")
         try engine.handle(.tab())
+        #expect(engine.state == .selecting)
+        #expect(engine.selectionOptions.map(\.text) == ["明日", "あした"])
+        #expect(try engine.markedText().text == "明日")
         try engine.handle(.escape)
-        #expect(try engine.markedText().text == "ashita")
-        #expect(converter.requests == ["ashita"])
+        #expect(try engine.markedText().text == "明日")
+        #expect(converter.requests == ["ashita", "ashita"])
         try engine.handle(.space)
         #expect(engine.state == .composing)
         #expect(try engine.markedText().text == "明日 ")
+    }
+
+    @Test func tabAfterEscapePreservesMixedRawAndSupportsReverseSelection() throws {
+        for reverse in [false, true] {
+            let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: MockConverter())
+            let raw = "ashita API👩‍💻"
+            try engine.replaceRaw(raw)
+            try engine.handle(.escape)
+            #expect(try engine.markedText().text == raw)
+            let opened = try engine.handle(.tab(reverse: reverse))
+            #expect(opened.commit == nil && engine.state == .selecting)
+            #expect(engine.buffer.text == raw)
+            #expect(engine.selectionOptions.map(\.text) == ["明日", "あした"])
+            #expect(try engine.markedText().text == "明日 API👩‍💻")
+            #expect(try engine.handle(.enter).commit == nil)
+            #expect(try engine.handle(.enter).commit?.text == "明日 API👩‍💻")
+            try engine.replaceRaw("hello 👩‍💻")
+            try engine.handle(.escape)
+            try engine.handle(.tab(reverse: reverse))
+            #expect(try engine.markedText().text == "hello 👩‍💻")
+            #expect(engine.buffer.text == "hello 👩‍💻")
+        }
     }
 
     @Test func secondEscapeCancelsEveryPreviewWithoutCommitting() throws {

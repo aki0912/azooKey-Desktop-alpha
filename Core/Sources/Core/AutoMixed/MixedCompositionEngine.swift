@@ -120,11 +120,10 @@ import Foundation
     }
 
     private func handleTab(reverse: Bool) throws {
-        if characterType != nil {
+        if characterType != nil || readingPreview != nil || state == .rawPreview {
             characterType = nil
             try edit { _ in }
         }
-        if readingPreview != nil { try edit { _ in } }
         do {
             try cycleCandidate(reverse: reverse)
         } catch {

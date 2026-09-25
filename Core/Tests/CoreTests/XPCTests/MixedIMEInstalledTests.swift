@@ -276,9 +276,13 @@ private final class ProbeReply: @unchecked Sendable {
             try await send(.key(.init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: code)))
         }
         for character in "13kai" { _ = try await key(String(character)) }
+        let rawPreview = try await key("\u{1b}", code: 53)
+        #expect(rawPreview.snapshot.markedText.elements.map(\.content).joined() == "13kai")
+        #expect(rawPreview.autoMixed?.commits.isEmpty == true)
         let list = try await key("\t", code: 48)
         #expect(list.autoMixed?.raw == "13kai")
         #expect(list.autoMixed?.status == .ready)
+        #expect(list.autoMixed?.commits.isEmpty == true)
         guard case .selecting(let candidates, _) = list.snapshot.candidateWindow else {
             Issue.record("Expected rich candidate list"); try await probe.close(session); return
         }

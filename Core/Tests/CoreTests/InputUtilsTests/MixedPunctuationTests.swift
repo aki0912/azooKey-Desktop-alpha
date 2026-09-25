@@ -137,10 +137,12 @@ private struct PunctuationSegmenter: LanguageSegmenter {
             #expect(try engine.handle(.enter).commit?.text == expected)
             try engine.replaceRaw(raw)
             try engine.handle(.escape)
+            #expect(try engine.markedText().text == raw)
             try engine.handle(.tab())
-            #expect(engine.selectionOptions.map(\.text) == [raw])
+            #expect(engine.selectionOptions.map(\.text) == [expected])
+            #expect(engine.buffer.text == raw)
             try engine.handle(.enter)
-            #expect(try engine.handle(.enter).commit?.text == raw)
+            #expect(try engine.handle(.enter).commit?.text == expected)
         }
     }
 
