@@ -9,6 +9,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the pinned romanization table
+        uses: actions/checkout@v4
+        with:
+          repository: azooKey/AzooKeyKanaKanjiConverter
+          ref: ad714fea8cb2fe113aea86ba5c42563cdaf77cfb
+          path: build/auto-mixed/core/checkouts/AzooKeyKanaKanjiConverter
+          sparse-checkout: Sources/KanaKanjiConverterModule/InputManagement/InputTables/defaultRoman2Kana.swift
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
