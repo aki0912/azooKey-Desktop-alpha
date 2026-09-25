@@ -64,6 +64,56 @@ private final class ProbeReply: @unchecked Sendable {
 
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["AUTO_MIXED_INSTALLED_TEST"] == "1"))
 @MainActor struct MixedIMEInstalledTests {
+    @Test func installedHelperConvertsJapaneseAfterLongCommittedContext() async throws {
+        let probe = MixedIMEProbe()
+        let session = "installed-ja-after-commit-" + UUID().uuidString
+        let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+        let capability = try #require(opened.autoMixedCapability)
+        let focus = UUID()
+        var operation: UInt64 = 0
+        func send(_ action: AutoMixedAction, left: String?) async throws -> ConverterServerResponse {
+            operation += 1
+            return try await probe.send(.session(sessionID: session, command: .autoMixed(.init(
+                serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                startsFocus: operation == 1, context: .init(leftSideContext: left), action: action))))
+        }
+        func key(_ text: String, code: UInt16 = 0, left: String?) async throws -> ConverterServerResponse {
+            try await send(.key(.init(modifierFlags: [], characters: text, charactersIgnoringModifiers: text, keyCode: code)), left: left)
+        }
+        func display(_ response: ConverterServerResponse) -> String { response.snapshot.markedText.elements.map(\.content).joined() }
+        for context in ["日本語を入力して確定しました。", "今日はいい天気なので公園に出かけようと思います。",
+                        "ある程度の日本語を入力して確定した後で、"] {
+            _ = try await key(context, left: nil)
+            let prior = try #require(try await send(.commit, left: nil).autoMixed?.commits.first)
+            #expect(prior.text == context)
+            _ = try await send(.commitApplied(prior.commitID), left: nil)
+            var response = opened
+            for character in "asita" { response = try await key(String(character), left: prior.text) }
+            #expect(response.autoMixed?.status == .ready)
+            #expect(response.autoMixed?.raw == "asita")
+            #expect(response.autoMixed?.spans.map(\.kind) == [.japaneseRoman])
+            #expect(display(response) == "明日")
+            let list = try await key("\t", code: 48, left: prior.text)
+            guard case .selecting(let candidates, _) = list.snapshot.candidateWindow else {
+                Issue.record("Expected Japanese candidates after commit"); try await probe.close(session); return
+            }
+            #expect(candidates.contains { $0.text == "明日" })
+            #expect(display(try await key("\u{7f}", code: 51, left: prior.text)) == "あし")
+            #expect(display(try await key("ta", left: prior.text)) == "明日")
+            let next = try #require(try await send(.commit, left: prior.text).autoMixed?.commits.first)
+            #expect(next.text == "明日")
+            #expect(try await send(.commitApplied(next.commitID), left: nil).autoMixed?.raw.isEmpty == true)
+            for raw in ["apple", "meeting", "note"] {
+                #expect(display(try await key(raw, left: context)) == raw)
+                let english = try #require(try await send(.commit, left: context).autoMixed?.commits.first)
+                #expect(english.text == raw)
+                _ = try await send(.commitApplied(english.commitID), left: nil)
+            }
+        }
+        _ = try await send(.deactivate, left: nil)
+        try await probe.close(session)
+    }
+
     @Test func installedHelperConvertsCompletedJapaneseReadingAsAWhole() async throws {
         let probe = MixedIMEProbe()
         let session = "installed-complete-reading-" + UUID().uuidString

@@ -1885,3 +1885,36 @@ macOS 27 arm64／Xcode 27／Swift 6.4のRelease構成で検証。依存の既存
 - 既存のapple、sample/meetingと日本語長音の混在、13階詳細候補、読み単位削除、長音、不成立ローマ字、句読点後の継続、括弧等の記号、確定重複排除も成功。1,000回の入力・確定・ack試験は26.129秒で成功。これは長時間RSSや打鍵のp95測定ではない。今回の追加試験・ビルド・更新に失敗はなかった。
 
 前節のHEADでも再現するCore既存4試験の失敗は未解決のまま別記しており、今回の実XPC成功で全テスト成功とは扱わない。実アプリでの物理打鍵、secure field、長時間利用・性能分布、SwiftLintは今回未実行。Mixed自動を選択して `kaihatu` とBackspaceの実打鍵を試せる状態。差分空白検査成功、未コミット。
+
+
+## 日本語確定後にかな表示へ固定される問題（2026-09-25）
+
+開始HEADは `9c52274`（Rejoin completed Japanese kana tails for whole-word conversion）、working treeはclean。利用者の「ある程度日本語を入力・確定した後、ひらがなのまま変換できなくなる」を調査。具体的な入力例は問い合わせ中のため、固定の自作文脈で独立に再現した。ログは `build/auto-mixed/japanese-after-commit-20260925/`。
+
+### 原因と変更
+
+- 固定文脈「日本語を入力して確定しました。」では、asitaの日本語スコア平均が文脈なし約0.9945から約0.0018へ下がる。ほか2文脈とkaihatu/nihongoでも同種の低下を確認（固定例だけの `authored-score-contrast.json`）。スコアは単語正解率ではない。現行モデルの文脈特徴が綴りの根拠を過剰に抑える条件がある。
+- AutoMixedServerSessionは確定後にengineを破棄し、次の文字で文脈を捕捉して新規作成していた。試験でfactory回数とcommit/ackを確認した。一方、新規判定がjapaneseKanaになるとMixedSessionConverterは読みだけを返し、変換器を呼ばない。Tabもこのかな専用spanに対して漢字候補を要求しない。今回の再現は状態残留やZenzaiの候補順位ではなく、変換前の表示採用条件によるもの。
+- JapanesePreferredSegmenterで、文脈付きではかな表示となる妥当な読みを、文脈なしの既存runtime判定と対照する。全体が辞書語・prefixなら除外し、対照が日本語roman／かなのみで少なくとも1区間が漢字変換可能な場合だけ、その区間を元のscalar範囲へ写して採用する。英語・保留・不成立が対照に残る場合や、文脈なしでもかなのみの場合は上書きしない。
+- 対照は現在区間のrawに限定し、追加の後続対照を無効化。文脈なしの対照からこの回復を再帰実行しない。モデル・係数・特徴量・閾値・schemaは不変。候補生成には本来の文脈を渡し続け、manualと通常版は変更しない。本文・文脈を収集する機能は追加していない。設計書03章§11.8／04章§3.3に仕様差分と影響を記録。
+
+### 検証・途中の失敗
+
+- 修正前の新規3試験は **52 assertion失敗、1.948秒**（`before.log`）。このうち50項目は、かな固定・候補要求なし・漢字候補なし・再入力と確定で漢字にならない等の対象挙動。実Zenzai試験では変換器が呼ばれずbackend readyにも達していなかった。残り2項目は新規試験のUnicode scalar期待値の誤りで、👩‍💻＋空白の後のasitaを5..<10としたが正しくは4..<9。期待する範囲を訂正し、表示・スコア条件は緩めていない。
+- 修正後の関連Core回帰は **67件・12 suite成功、skipなし、39.836秒**（`core.log`）。通常辞書・実Zenzaiを別試験とし、3つの固定日本語文脈を確定・ackした後のasita逐次入力、明日表示、converter呼出し、Tab候補、読み単位削除、再入力、再確定、child解放を確認。kaihatu/nihongoの変換区間とapple/meeting/noteの保持も成功。実Zenzai backend readyを要求、学習OFF。
+- 人工モデルでは文脈だけが負方向へ強く働く条件を作り、文脈なしでも根拠が弱い場合はかな表示を維持すること、made/name/note/no/toと英語prefix、URL等の保護を保持すること、Unicode範囲の整合性を確認。既存の完成読み結合、句読点継続、記号、長音、asitanx、不成立ローマ字、読み削除、英語混在、13階詳細候補も上記67件に含む。
+
+- 凍結v1/v2 golden、Python参照、fixture／承認済みexport、LR・Viterbi、原文・Unicode保護、session連続性の回帰は **32件・8 suite成功、skipなし、0.163秒**（`parity.log`）。既存参照データを再利用し、再学習・期待値の緩和は行っていない。
+- 更新前のインストール済みhelperへ、新規の確定後入力試験を実Mach XPCで実行し、**1件・15 assertion失敗、0.033秒**（`installed-before.log`）。3つの固定文脈で、asitaがかなspanになり、明日表示・Tabの漢字候補・再入力と確定の期待を満たさないことを確認。Core内だけの再現ではない。
+
+### Mixedへの反映と実XPCの再検証
+
+- Mixed専用Releaseビルド、署名・識別子の更新前検証、専用updateが成功（`build.log`／`update-dry-run.log`／`update.log`）。更新前はABCを選択中で、旧Mixedを `previous-azooKeyMixed.app` に退避した。更新前後のcurrent/statusは一致し、通常版・入力ソース登録・有効状態は変更していない。
+- **更新済み実Mach XPC試験12件成功、skipなし、26.868秒**（`installed-final.log`）。修正前に失敗した同じ確定後再現試験は4.372秒で成功。3つの固定文脈の確定・ack後にasitaを逐次入力し、japaneseRoman区間・明日表示・Tabの漢字候補・読みBackspace・再入力・再確定を確認した。apple/meeting/note保持、前回のkaihatu、句読点・記号・長音、英語混在、13階候補、原文とrevisionの保護も成功。1,000回入力・確定・ack試験も成功。物理打鍵・長時間の性能評価とは区別する。
+- 導入先のdeep strict署名検証成功（`signature.log`）。ビルド先・導入先のIME/helper/モデル/アイコン/5資源のSHA一致。モデル・アイコン・GGUF・marisaは更新前と同一（`hashes-before.json`／`hashes-after.json`）。IME SHAは `d7c12232af3612cf23fe009152af420dd5be077f465a53c3a9e9f78b53135981`、helper SHAは `98383ce75a5cad0d61aaba63663f7dd7cd7c691e408f52b9f8ebcb4d5e34f54a`。Release、診断OFF。
+
+### 制約・現在の状態
+
+macOS 27 arm64／Xcode 27／Swift 6.4。既存のSwiftPM native非推奨・依存deployment target等の警告は残る。実アプリでの物理打鍵、利用者自身の具体的入力文での再現照合、secure field、長文p95/p99・長時間RSS、SwiftLintは未実行。文脈学習データの補強・再学習は行っておらず、モデル自体の品質が改善したとは扱わない。前節に記録したHEADでも失敗する既存Core4試験は今回も修正対象外であり、全リポジトリの全テスト成功とは報告しない。
+
+原因を固定例と更新前の実XPCで切り分け、修正・関連回帰・Mixedへの反映・更新後実XPCまで完了。文脈なしの対照は1回のruntime呼出しで、既存末尾処理によるprefix再評価を含むため、LR呼出しが常に1回だけという意味ではない。未知語全般の精度や性能目標の達成を主張しない。差分空白検査成功、未コミット。Mixed自動へ切り替えて実アプリで試せる状態。

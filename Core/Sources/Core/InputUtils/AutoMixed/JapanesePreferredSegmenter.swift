@@ -124,6 +124,15 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
                         nextEnglish.append(EnglishRegion(range: span.sourceRange, raw: try source.slice(span.sourceRange)))
                     }
                 } else if let whole = japaneseSpan(range, source: source, scores: scores) {
+                    // Long committed contexts can suppress otherwise valid Japanese
+                    // spelling below the kana-preview gate. Use the existing raw-only
+                    // policy as a bounded control; retain context for actual conversion.
+                    if whole.kind == .japaneseKana,
+                       let restored = try contextIndependentJapanese(in: range, source: source) {
+                        result += restored
+                        start = end
+                        continue
+                    }
                     // A language-confidence boundary need not be a conversion boundary.
                     // Rejoin a completed, independently supported tail (kaiha + tu),
                     // while retaining weak reading previews and all English boundaries.
@@ -181,6 +190,24 @@ public final class JapanesePreferredSegmenter: LanguageSegmenter {
         previousEnglish = nextEnglish
         previousRaw = raw.isEmpty ? nil : raw
         return result
+    }
+
+    private func contextIndependentJapanese(in range: ScalarRange, source: TextOffsetMap) throws -> [MixedSpan]? {
+        guard context.isAvailable else { return nil }
+        let raw = try source.slice(range)
+        // Dictionary words and their continuations retain contextual disambiguation.
+        // A control that finds any English/RAW/invalid run cannot override that decision.
+        guard lexicon.exactLevel(raw) == nil, lexicon.prefixLevel(raw) == nil else { return nil }
+        let control = try JapanesePreferredSegmenter(model: model, lexicon: lexicon, policy: policy,
+                                                     context: .unavailable, focus: UUID())
+        control.permitsSuffixHypothesis = false
+        let spans = try control.segment(raw)
+        guard spans.contains(where: { $0.kind == .japaneseRoman }),
+              spans.allSatisfy({ $0.kind == .japaneseRoman || $0.kind == .japaneseKana }) else { return nil }
+        return try spans.map {
+            try MixedSpan(sourceRange: ScalarRange(range.lowerBound + $0.sourceRange.lowerBound,
+                                                   range.lowerBound + $0.sourceRange.upperBound), kind: $0.kind)
+        }
     }
 
     private func canRejoinKanaTail(_ spans: [MixedSpan], whole: MixedSpan,
