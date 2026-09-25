@@ -13,6 +13,7 @@ import Testing
     }
     final class Converter: JapaneseSpanConverting {
         var finishes = 0
+        func reading(for raw: String) -> String { CompositionCharacterType.hiragana.text(raw: raw) }
         func candidates(for raw: String, span: MixedSpan) -> [MixedCandidate] {
             [.init(token: "mock-1", text: "明日"), .init(token: "mock-2", text: "あした")]
         }
@@ -254,5 +255,80 @@ import Testing
         #expect(bridge.activeChildCount == 0)
         #expect(host.pendingCommitCount == 1)
         if useZenzai { #expect(bridge.backend == .zenzaiReady) }
+    }
+}
+
+extension AutoMixedTransportTests {
+    @Test func characterTypeKeysPreviewAndCommitExactlyOnceThroughWire() throws {
+        let epoch = UUID(), focus = UUID()
+        let host = session(epoch: epoch)
+        var operation: UInt64 = 0
+        func send(_ event: KeyEventCore) throws -> ConverterServerResponse {
+            operation += 1
+            let request = AutoMixedRequest(serverEpoch: epoch, focusID: focus, operationID: operation,
+                                           startsFocus: operation == 1, action: .key(event))
+            return try host.handle(request)
+        }
+        _ = try send(key("main"))
+        let option = try send(key("x", flags: .option))
+        #expect(option.snapshot.markedText.elements.map(\.content).joined() == "マイn")
+        #expect(option.autoMixed?.commits.isEmpty == true)
+        let control = try send(key(":", flags: .control))
+        #expect(control.snapshot.markedText.elements.map(\.content).joined() == "main")
+        #expect(control.autoMixed?.raw == "main")
+        #expect(control.autoMixed?.commits.isEmpty == true)
+        #expect(control.inputState == .composing)
+        let committed = try send(key("\r", code: 36))
+        #expect(committed.autoMixed?.commits.map(\.text) == ["main"])
+        #expect(committed.inputState == .none)
+        let duplicate = try host.handle(.init(serverEpoch: epoch, focusID: focus, operationID: operation,
+                                              action: .key(key("\r", code: 36))))
+        #expect(duplicate.autoMixed?.commits == committed.autoMixed?.commits)
+        var ledger = AutoMixedClientLedger()
+        ledger.activate(capability: .init(serverEpoch: epoch))
+        // Ledger needs its own focus; use a separate host to exercise pending preview recovery.
+        let pendingHost = session(epoch: epoch)
+        let typing = key("main")
+        let transform = key("x", flags: .option)
+        ledger.recordKey(typing, operationID: 1)
+        let typed = try #require(pendingHost.handle(.init(serverEpoch: epoch, focusID: ledger.focusID,
+            operationID: 1, startsFocus: true, action: .key(typing))).autoMixed)
+        let acceptedTyped = ledger.acceptSnapshot(typed)
+        #expect(acceptedTyped)
+        ledger.recordKey(transform, operationID: 2)
+        #expect(ledger.immediateCommitText(displayed: "main") == "マイn")
+        #expect(ledger.recoveryRaw() == "main")
+        let transformed = try #require(pendingHost.handle(.init(serverEpoch: epoch, focusID: ledger.focusID,
+            operationID: 2, action: .key(transform))).autoMixed)
+        let acceptedTransform = ledger.acceptSnapshot(transformed)
+        #expect(acceptedTransform)
+        ledger.recordKey(key("a"), operationID: 3)
+        #expect(ledger.immediateCommitText(displayed: "マイn") == "マイナ")
+        ledger.recordKey(key("\r", code: 36), operationID: 4)
+        #expect(ledger.immediateCommitText(displayed: "マイn") == "マイナ")
+    }
+}
+
+extension AutoMixedTransportTests {
+    @Test func pendingDeletionOfWholePreviewDoesNotLockNextComposition() throws {
+        let epoch = UUID()
+        var ledger = AutoMixedClientLedger()
+        ledger.activate(capability: .init(serverEpoch: epoch))
+        let host = session(epoch: epoch)
+        let events = [key("a"), key("c", flags: .option), key("\u{7f}", code: 51), key("b")]
+        for (index, event) in events.enumerated() {
+            let operation = UInt64(index + 1)
+            ledger.recordKey(event, operationID: operation)
+            let result = try #require(host.handle(.init(serverEpoch: epoch, focusID: ledger.focusID,
+                operationID: operation, startsFocus: operation == 1, action: .key(event))).autoMixed)
+            // Skip the intermediate empty snapshot to exercise delayed/out-of-order replies.
+            if operation != 3 {
+                if operation == 4 { #expect(ledger.immediateCommitText(displayed: "ａ") == "b") }
+                let accepted = ledger.acceptSnapshot(result)
+                #expect(accepted)
+            }
+        }
+        ledger.recordKey(key("x"), operationID: 5)
+        #expect(ledger.immediateCommitText(displayed: "b") == "bx")
     }
 }

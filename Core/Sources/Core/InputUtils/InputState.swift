@@ -18,10 +18,16 @@ public enum InputState: Sendable, Hashable {
         inputLanguage: InputLanguage,
         liveConversionEnabled: Bool,
         enableDebugWindow: Bool,
-        enableSuggestion: Bool
+        enableSuggestion: Bool,
+        characterType: CompositionCharacterType? = nil
     ) -> (ClientAction, ClientActionCallback) {
         if event.modifierFlags.contains(.command) {
             return (.fallthrough, .fallthrough)
+        }
+        if inputLanguage == .japanese,
+           self == .composing || self == .previewing || self == .selecting,
+           let type = CharacterTypeShortcut.resolve(event) {
+            return (.previewCharacterType(type), .transition(.composing))
         }
         if event.modifierFlags.contains(.option) {
             switch userAction {
@@ -52,6 +58,15 @@ public enum InputState: Sendable, Hashable {
                 return (.consume, .fallthrough)
             default:
                 break
+            }
+        }
+        if characterType != nil {
+            switch userAction {
+            case .escape: return (.clearCharacterType, .transition(.composing))
+            case .tab: return (.consume, .fallthrough)
+            case .英数: return (.commitMarkedTextAndSelectInputLanguage(.english), .transition(.none))
+            case .かな: return (.commitMarkedTextAndSelectInputLanguage(.japanese), .transition(.none))
+            default: break
             }
         }
         switch self {
@@ -156,18 +171,7 @@ public enum InputState: Sendable, Hashable {
                     return (.enterFirstCandidatePreviewMode, .transition(.previewing))
                 }
             case let .function(function):
-                switch function {
-                case .six:
-                    return (.submitHiraganaCandidate, .transition(.none))
-                case .seven:
-                    return (.submitKatakanaCandidate, .transition(.none))
-                case .eight:
-                    return (.submitHankakuKatakanaCandidate, .transition(.none))
-                case .nine:
-                    return (.submitFullWidthRomanCandidate, .transition(.none))
-                case .ten:
-                    return (.submitHalfWidthRomanCandidate, .transition(.none))
-                }
+                return (.previewCharacterType(function.characterType), .transition(.composing))
             case .forget:
                 return (.consume, .fallthrough)
             case .tab:
@@ -223,18 +227,7 @@ public enum InputState: Sendable, Hashable {
             case .escape:
                 return (.hideCandidateWindow, .transition(.composing))
             case let .function(function):
-                switch function {
-                case .six:
-                    return (.submitHiraganaCandidate, .transition(.none))
-                case .seven:
-                    return (.submitKatakanaCandidate, .transition(.none))
-                case .eight:
-                    return (.submitHankakuKatakanaCandidate, .transition(.none))
-                case .nine:
-                    return (.submitFullWidthRomanCandidate, .transition(.none))
-                case .ten:
-                    return (.submitHalfWidthRomanCandidate, .transition(.none))
-                }
+                return (.previewCharacterType(function.characterType), .transition(.composing))
             case .英数:
                 return (.selectInputLanguage(.english), .fallthrough)
             case .かな:
@@ -308,18 +301,7 @@ public enum InputState: Sendable, Hashable {
                     return (.consume, .fallthrough)
                 }
             case let .function(function):
-                switch function {
-                case .six:
-                    return (.submitHiraganaCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
-                case .seven:
-                    return (.submitKatakanaCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
-                case .eight:
-                    return (.submitHankakuKatakanaCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
-                case .nine:
-                    return (.submitFullWidthRomanCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
-                case .ten:
-                    return (.submitHalfWidthRomanCandidate, .basedOnSubmitCandidate(ifIsEmpty: .none, ifIsNotEmpty: .selecting))
-                }
+                return (.previewCharacterType(function.characterType), .transition(.composing))
             case .number(let num):
                 switch num {
                 case .one, .two, .three, .four, .five, .six, .seven, .eight, .nine:

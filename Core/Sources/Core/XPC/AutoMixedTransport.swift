@@ -86,6 +86,7 @@ public struct AutoMixedClientLedger {
     public private(set) var lastSnapshotOperation: UInt64 = 0
     private var appliedCommits = Set<UUID>()
     private var acknowledgedRaw = ""
+    private var acknowledgedCharacterType: CompositionCharacterType?
     private var pendingKeys: [(UInt64, KeyEventCore)] = []
     public init() {}
     public mutating func activate(capability: AutoMixedCapability?) {
@@ -94,6 +95,7 @@ public struct AutoMixedClientLedger {
         lastSnapshotOperation = 0
         appliedCommits = []
         acknowledgedRaw = ""
+        acknowledgedCharacterType = nil
         pendingKeys = []
     }
     public mutating func deactivate() { activate(capability: nil) }
@@ -105,7 +107,9 @@ public struct AutoMixedClientLedger {
             return false
         }
         lastSnapshotOperation = response.operationID
+        acknowledgedCharacterType = replayKeys(pendingKeys.filter { $0.0 <= response.operationID }, resetOnEnter: true).type
         acknowledgedRaw = response.raw
+        if acknowledgedRaw.isEmpty { acknowledgedCharacterType = nil }
         pendingKeys.removeAll { $0.0 <= response.operationID }
         return true
     }
@@ -115,20 +119,35 @@ public struct AutoMixedClientLedger {
     /// Failure recovery only. Unacknowledged Enter must not delete text that IMK
     /// has not inserted; this journal never performs language or candidate inference.
     public func recoveryRaw() -> String {
-        var buffer = RawCompositionBuffer()
-        try? buffer.insert(acknowledgedRaw)
-        for (_, key) in pendingKeys {
+        replayKeys(pendingKeys).raw
+    }
+    public func immediateCommitText(displayed: String) -> String {
+        guard !pendingKeys.isEmpty else {
+            return displayed
+        }
+        let recovered = replayKeys(pendingKeys)
+        return recovered.type?.text(raw: recovered.raw) ?? recovered.raw
+    }
+    private func replayKeys(_ keys: [(UInt64, KeyEventCore)], resetOnEnter: Bool = false)
+        -> (raw: String, type: CompositionCharacterType?) {
+        var buffer = RawCompositionBuffer(acknowledgedRaw)
+        var type = acknowledgedCharacterType
+        for (_, key) in keys {
             switch AutoMixedKeyRouter.input(key) {
             case .insert(let text): try? buffer.insert(text)
             case .space: try? buffer.insert(" ")
             case .backspace: _ = try? buffer.deleteBackward()
+            case .characterType(let requested): type = requested
+            case .escape, .tab: type = nil
+            case .enter where resetOnEnter && type != nil:
+                // A preview's Enter always commits; candidate adoption has no active type.
+                buffer = RawCompositionBuffer()
+                type = nil
             default: break
             }
+            if buffer.isEmpty { type = nil }
         }
-        return buffer.text
-    }
-    public func immediateCommitText(displayed: String) -> String {
-        pendingKeys.isEmpty ? displayed : recoveryRaw()
+        return (buffer.text, type)
     }
     public mutating func takeCommits(_ response: AutoMixedResponse) -> [AutoMixedCommitEffect] {
         guard accepts(response) else {
@@ -145,6 +164,9 @@ public struct AutoMixedClientLedger {
 
 public enum AutoMixedKeyRouter {
     public static func input(_ event: KeyEventCore) -> MixedInputEvent? {
+        if let type = CharacterTypeShortcut.resolve(event) {
+            return .characterType(type)
+        }
         guard !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control),
               !event.modifierFlags.contains(.option) else {
             return nil

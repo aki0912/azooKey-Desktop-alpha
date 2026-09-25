@@ -2,14 +2,6 @@ import Core
 import Foundation
 import KanaKanjiConverterModuleWithDefaultDictionary
 
-enum ConverterCandidateTransform {
-    case hiragana
-    case katakana
-    case halfWidthKatakana
-    case fullWidthRoman
-    case halfWidthRoman
-}
-
 extension ConverterServer {
     @MainActor
     func makeResponse(
@@ -134,33 +126,4 @@ extension ConverterServer {
         return inputStyle.inputStyle
     }
 
-    @MainActor
-    static func transformedCandidate(
-        _ transform: ConverterCandidateTransform,
-        manager: SegmentsManager,
-        inputState: InputState
-    ) -> Candidate {
-        switch transform {
-        case .hiragana:
-            manager.getModifiedRubyCandidate(inputState: inputState) {
-                $0.toHiragana()
-            }
-        case .katakana:
-            manager.getModifiedRubyCandidate(inputState: inputState) {
-                $0.toKatakana()
-            }
-        case .halfWidthKatakana:
-            manager.getModifiedRubyCandidate(inputState: inputState) {
-                $0.toKatakana().applyingTransform(.fullwidthToHalfwidth, reverse: false)!
-            }
-        case .fullWidthRoman:
-            manager.getModifiedRomanCandidate(inputState: inputState) {
-                $0.applyingTransform(.fullwidthToHalfwidth, reverse: true)!
-            }
-        case .halfWidthRoman:
-            manager.getModifiedRomanCandidate(inputState: inputState) {
-                $0.applyingTransform(.fullwidthToHalfwidth, reverse: false)!
-            }
-        }
-    }
 }

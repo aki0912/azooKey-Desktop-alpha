@@ -153,8 +153,8 @@ private func makeControlEvent(
         ),
         inputLanguage: .japanese
     )
-    guard case .function(.eight) = controlSemicolon else {
-        Issue.record("Expected Ctrl+; to be function(.eight), got \(controlSemicolon)")
+    guard case .function(.ten) = controlSemicolon else {
+        Issue.record("Expected Ctrl+; to be function(.ten), got \(controlSemicolon)")
         return
     }
 

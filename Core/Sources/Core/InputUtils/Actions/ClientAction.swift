@@ -40,12 +40,8 @@ public enum ClientAction {
     /// 学習のリセット
     case forgetMemory
 
-    // Fnキーでの変換
-    case submitKatakanaCandidate
-    case submitHiraganaCandidate
-    case submitHankakuKatakanaCandidate
-    case submitFullWidthRomanCandidate
-    case submitHalfWidthRomanCandidate
+    case previewCharacterType(CompositionCharacterType)
+    case clearCharacterType
 
     // PredictiveSuggestion
     case requestPredictiveSuggestion

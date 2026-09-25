@@ -35,6 +35,7 @@ public final class SegmentsManager {
     private let context: Context
 
     private var composingText: ComposingText = ComposingText()
+    public private(set) var characterType: CompositionCharacterType?
     private var lastInputStyle: InputStyle = .direct
 
     private var liveConversionEnabled: Bool {
@@ -229,6 +230,7 @@ public final class SegmentsManager {
 
     @MainActor
     public func activate() {
+        self.characterType = nil
         self.shouldShowCandidateWindow = false
         self.backspaceAdjustedPredictionCandidate = nil
         self.backspaceTypoCorrectionLock = nil
@@ -251,6 +253,7 @@ public final class SegmentsManager {
 
     @MainActor
     public func deactivate(flushLearningData: Bool = true) {
+        self.characterType = nil
         self.kanaKanjiConverter.stopComposition()
         if flushLearningData {
             self.kanaKanjiConverter.commitUpdateLearningData()
@@ -270,6 +273,7 @@ public final class SegmentsManager {
     @MainActor
     /// この入力を打ち切る
     public func stopComposition() {
+        self.characterType = nil
         self.composingText.stopComposition()
         self.kanaKanjiConverter.stopComposition()
         self.rawCandidates = nil
@@ -286,6 +290,7 @@ public final class SegmentsManager {
     @MainActor
     /// 日本語入力自体をやめる
     public func stopJapaneseInput() {
+        self.characterType = nil
         self.rawCandidates = nil
         self.didExperienceSegmentEdition = false
         self.lastOperation = .other
@@ -301,6 +306,7 @@ public final class SegmentsManager {
     /// 変換キーを押したタイミングで入力の区切りを示す
     @MainActor
     public func insertCompositionSeparator(inputStyle: InputStyle, skipUpdate: Bool = false) {
+        self.clearCharacterType()
         guard self.composingText.input.last?.piece != .compositionSeparator else {
             // すでに末尾がcompositionSeparatorの場合は何もしない
             return
@@ -366,6 +372,10 @@ public final class SegmentsManager {
 
     @MainActor
     public func deleteBackwardFromCursorPosition(count: Int = 1) {
+        if self.characterType?.isRoman == true {
+            self.deleteRawInput(count: count)
+            return
+        }
         var previousComposingText = self.composingText.prefixToCursorPosition()
         if !self.composingText.isAtEndIndex {
             // 右端に持っていく
@@ -478,6 +488,45 @@ public final class SegmentsManager {
         self.composingText.isEmpty
     }
 
+    @MainActor
+    public func previewCharacterType(_ type: CompositionCharacterType) {
+        guard !self.isEmpty else {
+            return
+        }
+        self.characterType = type
+        _ = self.composingText.moveCursorFromCursorPosition(
+            count: self.convertTarget.count - self.composingText.convertTargetCursorPosition)
+        self.didExperienceSegmentEdition = false
+        self.requestResettingSelection()
+        self.shouldShowCandidateWindow = false
+        self.backspaceAdjustedPredictionCandidate = nil
+        self.backspaceTypoCorrectionLock = nil
+        self.rawCandidates = nil
+    }
+
+    @MainActor
+    public func clearCharacterType() {
+        guard self.characterType != nil else {
+            return
+        }
+        self.characterType = nil
+        self.updateRawCandidate()
+    }
+
+    /// Roman previews delete original keystrokes, not an entire kana produced by several keys.
+    @MainActor
+    private func deleteRawInput(count: Int) {
+        var input = self.composingText.input
+        for _ in 0..<max(0, count) {
+            while input.last?.piece == .compositionSeparator { input.removeLast() }
+            if !input.isEmpty { input.removeLast() }
+        }
+        self.composingText = ComposingText()
+        self.composingText.insertAtCursorPosition(input)
+        self.lastOperation = .delete
+        self.updateRawCandidate()
+    }
+
     public func getCleanLeftSideContext(maxCount: Int) -> String? {
         self.delegate?.getLeftSideContext(maxCount: maxCount).map {
             var last = $0.split(separator: "\n", omittingEmptySubsequences: false).last ?? $0[...]
@@ -525,8 +574,13 @@ public final class SegmentsManager {
         self.resetAdditionalCandidates()
         // 不要
         if composingText.isEmpty {
+            self.characterType = nil
             self.rawCandidates = nil
             self.kanaKanjiConverter.stopComposition()
+            return
+        }
+        if self.characterType != nil {
+            self.rawCandidates = nil
             return
         }
         /// 日付・時刻変換を事前に入れておく
@@ -709,6 +763,9 @@ public final class SegmentsManager {
     }
 
     public func getCurrentCandidateWindow(inputState: InputState) -> CandidateWindow {
+        if self.characterType != nil {
+            return .hidden
+        }
         switch inputState {
         case .none, .previewing, .replaceSuggestion, .attachDiacritic, .unicodeInput:
             return .hidden
@@ -884,6 +941,9 @@ public final class SegmentsManager {
     }
 
     public func requestTypoCorrectionPredictionCandidates() -> [PredictionCandidate] {
+        guard self.characterType == nil else {
+            return []
+        }
         guard Config.DebugTypoCorrection().value else {
             return []
         }
@@ -912,6 +972,9 @@ public final class SegmentsManager {
     }
 
     public func requestPredictionCandidates() -> [PredictionCandidate] {
+        guard self.characterType == nil else {
+            return []
+        }
         guard let candidate = self.firstPredictionCandidate(),
               let prediction = Self.makePredictionCandidate(currentTarget: self.composingText.convertTarget, candidate: candidate) else {
             return []
@@ -1111,6 +1174,12 @@ public final class SegmentsManager {
 
     // swiftlint:disable:next cyclomatic_complexity
     public func getCurrentMarkedText(inputState: InputState) -> MarkedText {
+        if let characterType, !self.isEmpty {
+            let raw = self.composingText.input.map(\.piece).inputString(preferIntention: false)
+            let text = characterType.text(raw: raw, reading: self.convertTarget)
+            return MarkedText(text: [.init(content: text, focus: .none)],
+                              selectionRange: NSRange(location: text.utf16.count, length: 0))
+        }
         switch inputState {
         case .none, .attachDiacritic:
             return MarkedText(text: [], selectionRange: .notFound)

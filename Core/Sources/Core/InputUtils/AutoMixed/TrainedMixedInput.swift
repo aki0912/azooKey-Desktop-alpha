@@ -149,6 +149,10 @@ public struct TrainedMixedSegmenter: LanguageSegmenter {
         try candidates(for: raw, span: span, leftDisplay: "")
     }
 
+    public func reading(for raw: String) -> String {
+        CompositionCharacterType.hiragana.text(raw: raw)
+    }
+
     public func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate] {
         try candidates(for: raw, span: span, leftDisplay: leftDisplay, rich: false)
     }

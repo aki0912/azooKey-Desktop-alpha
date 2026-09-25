@@ -8,6 +8,8 @@ import Foundation
     public private(set) var state: MixedCompositionState = .idle
     public private(set) var revision: UInt64 = 0
     public private(set) var usedRawFallback = false
+    public private(set) var characterType: CompositionCharacterType?
+    private var characterTypeSpanID = UUID()
     public private(set) var selectionIndex: Int?
     public private(set) var selectionOptions: [MixedCandidate] = []
     public var selectedSpanID: UUID? { selectingSpanID }
@@ -46,6 +48,8 @@ import Foundation
     }
 
     private func clearComposition() {
+        characterType = nil
+        characterTypeSpanID = UUID()
         readingPreview = nil
         segmenter.reset()
         converter.finishComposition()
@@ -59,6 +63,11 @@ import Foundation
     }
 
     public func markedText() throws -> MixedMarkedText {
+        if let characterType {
+            return try MixedMarkedTextRenderer.renderCharacterType(
+                raw: buffer.text, text: characterType.text(raw: buffer.text, reading: converter.reading(for: buffer.text)),
+                id: characterTypeSpanID)
+        }
         var displayed = candidates.compactMapValues(\.first)
         displayed.merge(accepted) { _, chosen in chosen }
         if let id = selectingSpanID, let index = selectionIndex,
@@ -79,6 +88,15 @@ import Foundation
         }
         revision &+= 1
         switch event {
+        case .characterType(let type):
+            characterType = type
+            readingPreview = nil
+            closeSelection()
+            candidates = [:]
+            accepted = [:]
+            converter.finishComposition()
+            state = .composing
+            usedRawFallback = false
         case .insert(let text):
             if !text.isEmpty {
                 try edit { try $0.insert(text) }
@@ -88,18 +106,26 @@ import Foundation
         case .backspace:
             try deleteBackward()
         case .tab(let reverse):
-            if readingPreview != nil { try edit { _ in } }
-            do {
-                try cycleCandidate(reverse: reverse)
-            } catch {
-                try fallBackToRaw()
-            }
+            try handleTab(reverse: reverse)
         case .escape:
-            escape()
+            try escape()
         case .enter:
             return try enter()
         }
         return MixedEventResult(disposition: .consumed, commit: nil)
+    }
+
+    private func handleTab(reverse: Bool) throws {
+        if characterType != nil {
+            characterType = nil
+            try edit { _ in }
+        }
+        if readingPreview != nil { try edit { _ in } }
+        do {
+            try cycleCandidate(reverse: reverse)
+        } catch {
+            try fallBackToRaw()
+        }
     }
 
     private func startsComposition(_ event: MixedInputEvent) -> Bool {
@@ -109,7 +135,12 @@ import Foundation
         }
     }
 
-    private func escape() {
+    private func escape() throws {
+        if characterType != nil {
+            characterType = nil
+            try edit { _ in }
+            return
+        }
         if state == .selecting {
             state = selectionFromRawPreview ? .rawPreview : .composing
             closeSelection()
@@ -213,7 +244,7 @@ import Foundation
 
     private func deleteBackward() throws {
         let rawPreview = state == .rawPreview || selectionFromRawPreview
-        if !rawPreview, !usedRawFallback, buffer.cursorScalarOffset == buffer.offsets.scalarCount,
+        if characterType == nil, !rawPreview, !usedRawFallback, buffer.cursorScalarOffset == buffer.offsets.scalarCount,
            let last = spans.last, last.kind == .japaneseRoman || last.kind == .japaneseKana,
            let replacement = backspaceEditor?.deletingLastUnit(in: try buffer.offsets.slice(last.sourceRange)) {
             var retained = Array(spans.dropLast())
@@ -240,6 +271,11 @@ import Foundation
         usedRawFallback = false
         if buffer.isEmpty {
             clearComposition()
+            return
+        }
+        if characterType != nil {
+            spans = [try MixedSpan(id: characterTypeSpanID, sourceRange: ScalarRange(0, buffer.offsets.scalarCount), kind: .raw)]
+            state = .composing
             return
         }
         do {

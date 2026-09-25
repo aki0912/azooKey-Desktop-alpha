@@ -44,6 +44,8 @@ private struct MockSegmenter: LanguageSegmenter {
     var selectionFailure = false
     var invalidSelection = false
 
+    func reading(for raw: String) -> String { raw == "ashita main" ? "あした まいn" : raw }
+
     func selectionCandidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate]? {
         if selectionFailure { throw AutoMixedError.invalidCandidate }
         if invalidSelection {
@@ -373,4 +375,61 @@ private func loadEventFixture() throws -> EventFixture {
         directory.deleteLastPathComponent()
     }
     throw FixtureError.missingFixture
+}
+
+extension MixedCompositionEngineTests {
+    @Test func characterTypePreviewOverridesAllSpansAndKeepsOriginalKeys() throws {
+        let converter = MockConverter()
+        let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: converter)
+        try engine.replaceRaw("ashita main")
+        try engine.handle(.tab())
+        let oldRevision = engine.revision
+        try engine.handle(.characterType(.katakana))
+        #expect(try engine.markedText().text == "アシタ マイn")
+        try engine.handle(.characterType(.halfWidthRoman))
+        #expect(try engine.markedText().text == "ashita main")
+        #expect(engine.state == .composing && engine.selectionOptions.isEmpty)
+        #expect(try !engine.selectCandidate(at: 0, revision: oldRevision, adopt: true))
+        let requestCount = converter.requests.count
+        try engine.handle(.insert("shi"))
+        try engine.handle(.backspace)
+        #expect(try engine.markedText().text == "ashita mainsh")
+        #expect(converter.requests.count == requestCount)
+        try engine.handle(.space)
+        try engine.handle(.insert("API👩‍💻"))
+        #expect(try engine.markedText().text == "ashita mainsh API👩‍💻")
+        #expect(engine.buffer.text == "ashita mainsh API👩‍💻")
+        try engine.handle(.characterType(.fullWidthRoman))
+        let marked = try engine.markedText()
+        #expect(marked.text == "ａｓｈｉｔａ　ｍａｉｎｓｈ　ＡＰＩ👩‍💻")
+        #expect(marked.runs.count == 1)
+        #expect(marked.runs[0].span.sourceRange.upperBound == engine.buffer.text.unicodeScalars.count)
+        #expect(marked.runs[0].displayRange.length == marked.text.utf16.count)
+        #expect(marked.rawScalarOffset(forDisplayUTF16: 1) == nil)
+        #expect(marked.displayOffset(forRawScalar: engine.buffer.text.unicodeScalars.count) == marked.text.utf16.count)
+        #expect(try engine.handle(.enter).commit?.text == marked.text)
+        #expect(engine.characterType == nil && engine.buffer.isEmpty)
+        #expect(try engine.handle(.enter).disposition == .fallthroughToApplication)
+        try engine.handle(.insert("ashita"))
+        #expect(try engine.markedText().text == "明日")
+    }
+
+    @Test func characterTypeEscapeTabAndEmptyBufferRestoreAutomaticConversion() throws {
+        let engine = MixedCompositionEngine(segmenter: MockSegmenter(), converter: MockConverter())
+        #expect(try engine.handle(.characterType(.halfWidthRoman)).disposition == .fallthroughToApplication)
+        for end: MixedInputEvent in [.escape, .tab()] {
+            try engine.replaceRaw("ashita")
+            try engine.handle(.characterType(.halfWidthRoman))
+            try engine.handle(end)
+            #expect(engine.characterType == nil)
+            #expect(try engine.markedText().text == "明日")
+            engine.cancel()
+        }
+        try engine.handle(.insert("a"))
+        try engine.handle(.characterType(.fullWidthRoman))
+        try engine.handle(.backspace)
+        #expect(engine.characterType == nil && engine.buffer.isEmpty)
+        try engine.handle(.insert("ashita"))
+        #expect(try engine.markedText().text == "明日")
+    }
 }

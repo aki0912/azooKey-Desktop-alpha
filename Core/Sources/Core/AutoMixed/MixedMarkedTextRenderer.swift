@@ -64,6 +64,17 @@ public struct MixedMarkedText: Sendable {
 }
 
 public enum MixedMarkedTextRenderer {
+    public static func renderCharacterType(raw: String, text: String, id: UUID) throws -> MixedMarkedText {
+        let source = TextOffsetMap(raw)
+        guard !raw.isEmpty else {
+            return MixedMarkedText(text: "", runs: [], source: source)
+        }
+        let span = try MixedSpan(id: id, sourceRange: ScalarRange(0, source.scalarCount), kind: .raw)
+        let run = try MixedDisplayRun(span: span, displayRange: UTF16Range(location: 0, length: text.utf16.count),
+                                      isAtomic: text != raw)
+        return MixedMarkedText(text: text, runs: [run], source: source)
+    }
+
     public static func validate(spans: [MixedSpan], source: TextOffsetMap) throws {
         var end = 0
         var identifiers = Set<UUID>()

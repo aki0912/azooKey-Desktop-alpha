@@ -89,6 +89,8 @@ public extension LanguageSegmenter {
 /// Preview-only boundary. No learning or OS insertion is performed by the pure engine.
 /// T4's adapter owns child sessions; the IMK commit acknowledgement contract belongs to T5.
 @MainActor public protocol JapaneseSpanConverting {
+    /// Input-table reading for explicit character-type previews, preserving unresolved input.
+    func reading(for raw: String) -> String
     func candidates(for raw: String, span: MixedSpan) throws -> [MixedCandidate]
     func prepare(revision: UInt64, sourceScalarCount: Int, retaining spanIDs: Set<UUID>)
     func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate]
@@ -98,6 +100,7 @@ public extension LanguageSegmenter {
 }
 
 public extension JapaneseSpanConverting {
+    func reading(for raw: String) -> String { raw }
     func prepare(revision: UInt64, sourceScalarCount: Int, retaining spanIDs: Set<UUID>) {}
     func candidates(for raw: String, span: MixedSpan, leftDisplay: String) throws -> [MixedCandidate] {
         try candidates(for: raw, span: span)
@@ -111,6 +114,7 @@ public enum MixedCompositionState: Sendable, Equatable {
 }
 
 public enum MixedInputEvent: Sendable {
+    case characterType(CompositionCharacterType)
     case insert(String)
     case space
     case tab(reverse: Bool = false)

@@ -125,6 +125,10 @@ public enum UserAction {
             }
         }
 
+        if eventCore.modifierFlags != [.option], let type = CharacterTypeShortcut.resolve(eventCore) {
+            return .function(type.function)
+        }
+
         // Resolve action based on logical key character (ignoring modifiers)
         if let logicalKey = eventCore.charactersIgnoringModifiers?.lowercased() {
             switch (logicalKey, eventCore.modifierFlags) {
@@ -146,18 +150,6 @@ public enum UserAction {
                 return .editSegment(-1)  // Shift segment cursor left
             case ("o", [.control]): // Control + o
                 return .editSegment(1)  // Shift segment cursor right
-            case ("l", [.control]): // Control + l
-                return .function(.nine)
-            case ("j", [.control]): // Control + j
-                return .function(.six)
-            case ("k", [.control]): // Control + k
-                return .function(.seven)
-            case (";", [.control]): // Control + ;
-                return .function(.eight)
-            case (":", [.control]): // Control + :
-                return .function(.ten)
-            case ("'", [.control]): // Control + '
-                return .function(.ten)
             case ("s", [.control]): // Control + s
                 return .suggest
             case ("u", [.control, .shift]): // Shift + Control + u
@@ -230,16 +222,6 @@ public enum UserAction {
             }
         case 53: // Escape
             return .escape
-        case 97: // F6
-            return .function(.six)
-        case 98: // F7
-            return .function(.seven)
-        case 100: // F8
-            return .function(.eight)
-        case 101: // F9
-            return .function(.nine)
-        case 109: // F10
-            return .function(.ten)
         case 102: // 英数
             return .英数
         case 104: // Lang1/kVK_JIS_Kana

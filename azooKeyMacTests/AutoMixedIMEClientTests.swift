@@ -279,3 +279,69 @@ import XCTest
         }
     }
 }
+
+extension AutoMixedIMEClientTests {
+    func testCharacterTypeKeysDuringNegotiationCommitOnceAndIgnoreRetiredReplies() throws {
+        struct Segmenter: LanguageSegmenter {
+            func segment(_ raw: String) throws -> [MixedSpan] {
+                raw.isEmpty ? [] : [try .init(sourceRange: ScalarRange(0, raw.unicodeScalars.count), kind: .raw)]
+            }
+        }
+        final class Converter: JapaneseSpanConverting {
+            func reading(for raw: String) -> String { CompositionCharacterType.hiragana.text(raw: raw) }
+            func candidates(for raw: String, span: MixedSpan) -> [MixedCandidate] { [] }
+        }
+        let epoch = UUID()
+        let matchingHost = AutoMixedServerSession(epoch: epoch) { _ in
+            MixedCompositionEngine(segmenter: Segmenter(), converter: Converter())
+        }
+        let transport = Transport(), field = Field()
+        var displayed = ""
+        let client = AutoMixedIMEClient(server: transport, experimentEnabled: { true }) {
+            displayed = $0.snapshot.markedText.elements.map(\.content).joined()
+        }
+        client.requestedPolicy = .automaticMixed
+        client.activate(client: field, canEnable: { true })
+        let optionX = KeyEventCore(modifierFlags: .option, characters: "≈", charactersIgnoringModifiers: "x", keyCode: 7)
+        let controlColon = KeyEventCore(modifierFlags: [.control, .shift], characters: ":", charactersIgnoringModifiers: ":", keyCode: 41)
+        func press(_ event: KeyEventCore) {
+            XCTAssertEqual(client.handle(event, client: field, inputStyle: .defaultRomanToKana, context: { .init() }), true)
+        }
+        var cursor = 0
+        func flush() throws {
+            while cursor < transport.commands.count {
+                let (command, reply) = transport.commands[cursor]
+                cursor += 1
+                switch command {
+                case .composition(.snapshot): reply(.init(snapshot: .empty, autoMixedCapability: .init(serverEpoch: epoch)))
+                case .autoMixed(let request): reply(try matchingHost.handle(request))
+                default: XCTFail("Unexpected manual command")
+                }
+            }
+        }
+        press(key("main"))
+        press(optionX)
+        try flush()
+        XCTAssertEqual(displayed, "マイn")
+        XCTAssertTrue(field.inserted.isEmpty)
+        press(controlColon)
+        try flush()
+        XCTAssertEqual(displayed, "main")
+        XCTAssertTrue(field.inserted.isEmpty)
+        press(key("\r", code: 36))
+        try flush()
+        XCTAssertEqual(field.inserted, ["main"])
+        XCTAssertEqual(client.handle(key("\r", code: 36), client: field, inputStyle: .defaultRomanToKana, context: { .init() }), false)
+        XCTAssertEqual(client.handle(optionX, client: field, inputStyle: .defaultRomanToKana, context: { .init() }), false)
+        press(key("main"))
+        try flush()
+        press(optionX) // End focus before the transform reply arrives.
+        guard case .autoMixed(let delayed) = transport.commands.last!.0 else { return XCTFail("Expected mixed key") }
+        let reply = transport.commands.last!.1
+        let lateResponse = try matchingHost.handle(delayed)
+        XCTAssertTrue(client.finishImmediately(client: field, keepMode: false))
+        XCTAssertEqual(field.inserted, ["main", "マイn"])
+        reply(lateResponse)
+        XCTAssertEqual(field.inserted, ["main", "マイn"])
+    }
+}

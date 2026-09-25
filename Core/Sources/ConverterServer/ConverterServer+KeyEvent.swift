@@ -62,7 +62,8 @@ extension ConverterServer {
             inputLanguage: session.inputLanguage,
             liveConversionEnabled: request.liveConversionEnabled,
             enableDebugWindow: request.enableDebugWindow,
-            enableSuggestion: request.enableSuggestion
+            enableSuggestion: request.enableSuggestion,
+            characterType: session.manager.characterType
         )
 
         var effects: [ConverterClientEffect] = []
@@ -144,6 +145,7 @@ extension ConverterServer {
                 effects.append(.insertText(text))
             }
         case .editSegment(let count):
+            manager.clearCharacterType()
             manager.editSegment(count: count)
         case .enterFirstCandidatePreviewMode:
             manager.insertCompositionSeparator(inputStyle: inputStyle, skipUpdate: false)
@@ -191,22 +193,18 @@ extension ConverterServer {
             manager.requestDebugWindowMode(enabled: false)
         case .forgetMemory:
             manager.forgetMemory()
-        case .submitKatakanaCandidate:
-            submitTransformedCandidate(.katakana, manager: manager, inputState: inputState, leftSideContext: leftSideContext, effects: &effects)
-        case .submitHiraganaCandidate:
-            submitTransformedCandidate(.hiragana, manager: manager, inputState: inputState, leftSideContext: leftSideContext, effects: &effects)
-        case .submitHankakuKatakanaCandidate:
-            submitTransformedCandidate(.halfWidthKatakana, manager: manager, inputState: inputState, leftSideContext: leftSideContext, effects: &effects)
-        case .submitFullWidthRomanCandidate:
-            submitTransformedCandidate(.fullWidthRoman, manager: manager, inputState: inputState, leftSideContext: leftSideContext, effects: &effects)
-        case .submitHalfWidthRomanCandidate:
-            submitTransformedCandidate(.halfWidthRoman, manager: manager, inputState: inputState, leftSideContext: leftSideContext, effects: &effects)
+        case .previewCharacterType(let type):
+            session.clearReplaceSuggestions()
+            manager.previewCharacterType(type)
+        case .clearCharacterType:
+            manager.clearCharacterType()
         case .requestPredictiveSuggestion:
             manager.insertAtCursorPosition("つづき", inputStyle: inputStyle)
             effects.append(.requestReplaceSuggestion)
         case .acceptPredictionCandidate:
             manager.acceptPredictionCandidate()
         case .requestReplaceSuggestion:
+            manager.clearCharacterType()
             session.clearReplaceSuggestions()
             effects.append(.requestReplaceSuggestion)
         case .selectNextReplaceSuggestionCandidate:
@@ -278,19 +276,6 @@ extension ConverterServer {
         guard let candidate = manager.selectedCandidate else {
             return
         }
-        manager.prefixCandidateCommited(candidate, leftSideContext: leftSideContext ?? "")
-        effects.append(.insertText(candidate.text))
-    }
-
-    @MainActor
-    func submitTransformedCandidate(
-        _ transform: ConverterCandidateTransform,
-        manager: SegmentsManager,
-        inputState: InputState,
-        leftSideContext: String?,
-        effects: inout [ConverterClientEffect]
-    ) {
-        let candidate = Self.transformedCandidate(transform, manager: manager, inputState: inputState)
         manager.prefixCandidateCommited(candidate, leftSideContext: leftSideContext ?? "")
         effects.append(.insertText(candidate.text))
     }

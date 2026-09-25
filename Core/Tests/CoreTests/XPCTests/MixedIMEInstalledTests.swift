@@ -655,4 +655,55 @@ private final class ProbeReply: @unchecked Sendable {
         try await probe.close(session)
     }
 }
+extension MixedIMEInstalledTests {
+    @Test func installedHelperPreviewsCharacterTypesInManualAndAutomaticInput() async throws {
+        struct Shortcut {
+            let text: String
+            let flags: KeyEventCore.ModifierFlag
+            let expected: String
+        }
+        let shortcuts: [Shortcut] = [
+            .init(text: "z", flags: .option, expected: "まいn"), .init(text: "x", flags: .option, expected: "マイn"),
+            .init(text: "a", flags: .option, expected: "main"), .init(text: "c", flags: .option, expected: "ｍａｉｎ"),
+            .init(text: "s", flags: .option, expected: "main"), .init(text: "j", flags: .control, expected: "まいn"),
+            .init(text: "k", flags: .control, expected: "マイn"), .init(text: "l", flags: .control, expected: "ｍａｉｎ"),
+            .init(text: ";", flags: .control, expected: "main"), .init(text: ":", flags: .control, expected: "main"),
+            .init(text: "'", flags: .control, expected: "main"), .init(text: ":", flags: [.control, .shift], expected: "main")
+        ]
+        for automatic in [false, true] {
+            let probe = MixedIMEProbe(), session = "character-type-" + UUID().uuidString
+            let opened = try await probe.send(.openSession(sessionID: session, command: .composition(.snapshot)))
+            let capability = try #require(opened.autoMixedCapability), focus = UUID()
+            var operation: UInt64 = 0
+            func key(_ text: String, flags: KeyEventCore.ModifierFlag = [], code: UInt16 = 0) async throws -> ConverterServerResponse {
+                operation += 1
+                let event = KeyEventCore(modifierFlags: flags, characters: text, charactersIgnoringModifiers: text, keyCode: code)
+                let command: ConverterSessionCommand = automatic
+                    ? .autoMixed(.init(serverEpoch: capability.serverEpoch, focusID: focus, operationID: operation,
+                                       startsFocus: operation == 1, action: .key(event)))
+                    : .handleKeyEvent(.init(eventID: operation, event: event, inputStyle: .defaultRomanToKana,
+                                            liveConversionEnabled: true, enableDebugWindow: false, enableSuggestion: false))
+                return try await probe.send(.session(sessionID: session, command: command))
+            }
+            _ = try await key("main")
+            for shortcut in shortcuts {
+                let response = try await key(shortcut.text, flags: shortcut.flags)
+                #expect(response.snapshot.markedText.elements.map(\.content).joined() == shortcut.expected)
+                #expect(response.inputState == .composing)
+                #expect(response.effects.isEmpty)
+                #expect(response.autoMixed?.commits.isEmpty ?? true)
+            }
+            #expect(try await key("shi").snapshot.markedText.elements.map(\.content).joined() == "mainshi")
+            #expect(try await key("\u{7f}", code: 51).snapshot.markedText.elements.map(\.content).joined() == "mainsh")
+            let committed = try await key("\r", code: 36)
+            #expect(committed.inputState == .none)
+            if automatic {
+                #expect(committed.autoMixed?.commits.map(\.text) == ["mainsh"])
+            } else {
+                #expect(committed.effects == [.insertText("mainsh")])
+            }
+            try await probe.close(session)
+        }
+    }
+}
 #endif
