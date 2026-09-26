@@ -12,6 +12,14 @@ REVISION = "5ef55f9c42730ebe4394a78b77855468a6f15dd2"
 SHA256 = "5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc"
 URL = f"https://downloads.sourceforge.net/project/wordlist/SCOWL/{VERSION}/scowl-{VERSION}.tar.gz"
 OUTPUT = Path(__file__).resolve().parents[1] / "Core/Sources/Core/InputUtils/AutoMixed/EnglishLexiconResources"
+# User-confirmed runtime vocabulary, authored separately from SCOWL source levels.
+SUPPLEMENTAL_WORDS = """
+azookey backend chatgpt claude codex config deploy docker figma firefox frontend
+gemini git github gitlab google homebrew ios ipad iphone javascript json linux
+localhost mac macos markdown npm obsidian openai plugin pnpm rebase swiftui
+vscode xcode yaml
+""".split()
+SUPPLEMENTAL_LEVEL = 20
 
 
 def generate(archive):
@@ -36,11 +44,14 @@ def generate(archive):
         copyright_text = source.extractfile(f"scowl-{VERSION}/Copyright").read()
     if not words or not inputs:
         raise ValueError("No dictionary data")
-    text = "# Modified SCOWL subset; see Copyright and README.md.\n"
+    for word in SUPPLEMENTAL_WORDS:
+        words[word] = min(words.get(word, SUPPLEMENTAL_LEVEL), SUPPLEMENTAL_LEVEL)
+    text = "# Modified SCOWL subset with authored additions; see Copyright and README.md.\n"
     text += "".join(f"{word}\t{level}\n" for word, level in sorted(words.items()))
     data = text.encode("ascii")
     receipt = dict(source_url=URL, version=VERSION, source_revision=REVISION, archive_sha256=SHA256,
                    purpose="runtime_dictionary_only_not_training_data", source_files=inputs,
+                   authored_additions=dict(words=sorted(SUPPLEMENTAL_WORDS), level=SUPPLEMENTAL_LEVEL),
                    word_count=len(words), output_sha256=hashlib.sha256(data).hexdigest(),
                    copyright_sha256=hashlib.sha256(copyright_text).hexdigest())
     return {"english.tsv": data, "Copyright": copyright_text,

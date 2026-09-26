@@ -10,6 +10,24 @@ import Testing
         return try LogisticLanguageModel(data: Data(contentsOf: URL(fileURLWithPath: path)))
     }
 
+    @Test func macKeepsEnglishBoundaryAfterPeriod() throws {
+        let model = try model()
+        for context in ["", "。", "今日は晴れです。"] {
+            let preferred = try JapanesePreferredSegmenter(model: model, lexicon: .bundled(), policy: .bundled(),
+                                                           context: .available(context), focus: UUID())
+            let raw = "Macdeugokasu"
+            for count in 1...raw.count {
+                _ = try preferred.segment(String(raw.prefix(count)))
+            }
+            for _ in 0..<2 {
+                let spans = try preferred.segment(raw)
+                #expect(spans.map(\.kind) == [.raw, .japaneseRoman])
+                #expect(spans.map(\.sourceRange) == [try ScalarRange(0, 3), try ScalarRange(3, raw.count)])
+                preferred.reset()
+            }
+        }
+    }
+
     @Test func completeAppleRemainsEnglishAfterJapaneseContext() throws {
         let model = try model()
         let contexts = [CommittedLeftContext.unavailable] + [

@@ -30,7 +30,7 @@ import Testing
 
     @Test func bundledLexiconIsLocalVersionedAndStrict() throws {
         let dictionary = try EnglishLexicon.bundled()
-        #expect(dictionary.count == 50_957)
+        #expect(dictionary.count == 50_994)
         #expect(dictionary.exactLevel("note") == 10)
         #expect(dictionary.exactLevel("NOTE") == 10)
         #expect(dictionary.exactLevel("menu") == 20)

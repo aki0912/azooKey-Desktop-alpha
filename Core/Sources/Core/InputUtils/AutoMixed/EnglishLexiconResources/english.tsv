@@ -1,4 +1,4 @@
-# Modified SCOWL subset; see Copyright and README.md.
+# Modified SCOWL subset with authored additions; see Copyright and README.md.
 a	10
 aardvark	20
 aback	35
@@ -2892,6 +2892,7 @@ ayes	35
 azalea	35
 azalea's	35
 azaleas	35
+azookey	20
 azure	35
 azure's	35
 azures	35
@@ -2923,6 +2924,7 @@ backbone	20
 backbone's	35
 backbones	35
 backed	10
+backend	20
 backer	35
 backer's	35
 backers	35
@@ -6987,6 +6989,7 @@ chastity	35
 chastity's	35
 chat	20
 chat's	35
+chatgpt	20
 chats	20
 chatted	20
 chatter	35
@@ -7631,6 +7634,7 @@ clatter's	35
 clattered	35
 clattering	35
 clatters	35
+claude	20
 clause	20
 clause's	20
 clauses	20
@@ -8035,6 +8039,7 @@ code	10
 code's	10
 coded	10
 codes	10
+codex	20
 coding	10
 cods	35
 coefficient	35
@@ -8911,6 +8916,7 @@ confidentially	35
 confidently	35
 confides	35
 confiding	35
+config	20
 configurable	35
 configuration	20
 configuration's	20
@@ -11787,6 +11793,7 @@ deplore	35
 deplored	35
 deplores	35
 deploring	35
+deploy	20
 deport	35
 deportation	35
 deportation's	35
@@ -13290,6 +13297,7 @@ docile	35
 dock	35
 dock's	35
 docked	35
+docker	20
 docking	35
 docks	35
 doctor	20
@@ -16866,6 +16874,7 @@ fighter's	35
 fighters	35
 fighting	20
 fights	20
+figma	20
 figment	35
 figment's	35
 figments	35
@@ -17022,6 +17031,7 @@ firefighters	35
 fireflies	35
 firefly	35
 firefly's	35
+firefox	20
 fireman	35
 fireman's	35
 firemen	35
@@ -18347,6 +18357,7 @@ frontage's	35
 frontages	35
 frontal	35
 fronted	35
+frontend	20
 frontier	35
 frontier's	35
 frontiers	35
@@ -18903,6 +18914,7 @@ geldings	35
 gelds	35
 gem	35
 gem's	35
+gemini	20
 gems	35
 gender	20
 gender's	35
@@ -19167,6 +19179,9 @@ girth's	35
 girths	35
 gist	35
 gist's	35
+git	20
+github	20
+gitlab	20
 give	10
 given	10
 given's	35
@@ -19521,6 +19536,7 @@ goofiest	35
 goofing	35
 goofs	35
 goofy	35
+google	20
 gooier	35
 gooiest	35
 goon	35
@@ -21485,6 +21501,7 @@ homage's	35
 homages	35
 home	10
 home's	20
+homebrew	20
 homed	35
 homeland	35
 homeland's	35
@@ -24181,9 +24198,12 @@ iodine's	35
 ion	20
 ion's	35
 ions	35
+ios	20
 iota	35
 iota's	35
 iotas	35
+ipad	20
+iphone	20
 irascible	35
 irate	20
 ire	35
@@ -24438,6 +24458,7 @@ jauntily	35
 jaunting	35
 jaunts	35
 jaunty	35
+javascript	20
 javelin	35
 javelin's	35
 javelins	35
@@ -24681,6 +24702,7 @@ joyous	35
 joyously	35
 joys	35
 joystick	35
+json	20
 jubilant	35
 jubilation	35
 jubilation's	35
@@ -26134,6 +26156,7 @@ linoleum	35
 linoleum's	35
 lint	35
 lint's	35
+linux	20
 lion	20
 lion's	35
 lioness	35
@@ -26326,6 +26349,7 @@ local's	20
 locale	35
 locale's	35
 locales	35
+localhost	20
 localise	35
 localised	35
 localises	35
@@ -26758,6 +26782,7 @@ m	35
 ma	35
 ma'am	35
 ma's	35
+mac	20
 macabre	35
 macaroni	35
 macaroni's	35
@@ -26784,6 +26809,7 @@ macing	35
 mackerel	35
 mackerel's	35
 mackerels	35
+macos	20
 macroscopic	35
 mad	10
 mad's	35
@@ -27248,6 +27274,7 @@ marital	20
 maritime	35
 mark	10
 mark's	10
+markdown	20
 marked	10
 markedly	35
 marker	20
@@ -30159,6 +30186,7 @@ noxious	35
 nozzle	35
 nozzle's	35
 nozzles	35
+npm	20
 nuance	35
 nuance's	35
 nuances	35
@@ -30400,6 +30428,7 @@ obsession	20
 obsession's	35
 obsessions	35
 obsessive	35
+obsidian	20
 obsolescence	35
 obsolescence's	35
 obsolescent	35
@@ -30696,6 +30725,7 @@ opaquest	35
 opaquing	35
 open	10
 open's	10
+openai	20
 opened	10
 opener	35
 opener's	35
@@ -33615,6 +33645,7 @@ plug	10
 plug's	20
 plugged	20
 plugging	20
+plugin	20
 plugs	20
 plum	35
 plum's	35
@@ -33680,6 +33711,7 @@ plywood's	35
 pneumatic	35
 pneumonia	35
 pneumonia's	35
+pnpm	20
 poach	35
 poached	35
 poacher	35
@@ -36485,6 +36517,7 @@ reassure	20
 reassured	20
 reassures	20
 reassuring	20
+rebase	20
 rebate	35
 rebate's	35
 rebated	35
@@ -44790,6 +44823,7 @@ swifter	35
 swiftest	35
 swiftly	35
 swifts	35
+swiftui	20
 swig	35
 swig's	35
 swigged	35
@@ -49319,6 +49353,7 @@ voyager's	35
 voyagers	35
 voyages	35
 voyaging	35
+vscode	20
 vulgar	35
 vulgarer	35
 vulgarest	35
@@ -50736,6 +50771,7 @@ wrung	35
 wry	35
 wryer	35
 wryest	35
+xcode	20
 xenophobia	35
 xylophone	35
 xylophone's	35
@@ -50752,6 +50788,7 @@ yakking	35
 yaks	35
 yam	35
 yam's	35
+yaml	20
 yams	35
 yank	35
 yank's	35
